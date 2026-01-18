@@ -41,7 +41,7 @@ Get your API key from https://trello.com/power-ups/admin and generate a token fo
 ## Usage
 
 ```bash
-trello card update-desc <CARD_ID> <DESCRIPTION>
+trello card update <CARD_ID> <DESCRIPTION>
 trello card label <CARD_ID> <LABEL_NAME>
 trello card archive <CARD_ID>
 trello card move <CARD_ID> <POSITION>

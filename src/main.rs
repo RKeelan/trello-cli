@@ -1,6 +1,10 @@
 mod client;
+mod models;
 
+use anyhow::Result;
 use clap::{Parser, Subcommand};
+
+use client::TrelloClient;
 
 #[derive(Parser)]
 #[command(name = "trello")]
@@ -27,7 +31,7 @@ enum Commands {
 #[derive(Subcommand)]
 enum CardCommands {
     /// Update a card's description
-    UpdateDesc {
+    Update {
         /// The card ID
         card_id: String,
         /// The new description
@@ -66,35 +70,52 @@ enum ListCommands {
 }
 
 fn main() {
+    if let Err(e) = run() {
+        eprintln!("Error: {e:#}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
+    let client = TrelloClient::from_env()?;
 
     match cli.command {
         Commands::Card { command } => match command {
-            CardCommands::UpdateDesc {
+            CardCommands::Update {
                 card_id,
                 description,
             } => {
-                println!("Update card {} description to: {}", card_id, description);
+                let card = client.update_card_description(&card_id, &description)?;
+                println!("Updated card '{}' description", card.name);
             }
             CardCommands::Label {
-                card_id,
-                label_name,
+                card_id: _,
+                label_name: _,
             } => {
-                println!("Apply label {} to card {}", label_name, card_id);
+                todo!("Apply label to card")
             }
-            CardCommands::Archive { card_id } => {
-                println!("Archive card {}", card_id);
+            CardCommands::Archive { card_id: _ } => {
+                todo!("Archive card")
             }
-            CardCommands::Move { card_id, position } => {
-                println!("Move card {} to position {}", card_id, position);
+            CardCommands::Move {
+                card_id: _,
+                position: _,
+            } => {
+                todo!("Move card")
             }
         },
         Commands::List { command } => match command {
-            ListCommands::Move { list_id, position } => {
-                println!("Move list {} to position {}", list_id, position);
+            ListCommands::Move {
+                list_id: _,
+                position: _,
+            } => {
+                todo!("Move list")
             }
         },
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -108,20 +129,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_card_update_desc() {
+    fn parse_card_update() {
         let cli =
-            Cli::try_parse_from(["trello", "card", "update-desc", "abc123", "New description"])
-                .unwrap();
+            Cli::try_parse_from(["trello", "card", "update", "abc123", "New description"]).unwrap();
         match cli.command {
             Commands::Card { command } => match command {
-                CardCommands::UpdateDesc {
+                CardCommands::Update {
                     card_id,
                     description,
                 } => {
                     assert_eq!(card_id, "abc123");
                     assert_eq!(description, "New description");
                 }
-                _ => panic!("Expected UpdateDesc command"),
+                _ => panic!("Expected Update command"),
             },
             _ => panic!("Expected Card command"),
         }
