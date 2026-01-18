@@ -27,6 +27,17 @@ Run:
 cargo run -- --help
 ```
 
+## Configuration
+
+Set the following environment variables:
+
+```bash
+export TRELLO_API_KEY="your_api_key"
+export TRELLO_API_TOKEN="your_api_token"
+```
+
+Get your API key from https://trello.com/power-ups/admin and generate a token for it.
+
 ## Usage
 
 ```bash
