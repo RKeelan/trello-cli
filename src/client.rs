@@ -1,9 +1,11 @@
-#![allow(dead_code)] // TODO: Remove once client is used
+#![allow(dead_code)] // Methods will be used as features are added
 
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
 use serde::{Serialize, de::DeserializeOwned};
 use std::env;
+
+use crate::models::{Card, UpdateCardDesc};
 
 const BASE_URL: &str = "https://api.trello.com/1";
 
@@ -82,6 +84,16 @@ impl TrelloClient {
             .context("Failed to send POST request")?;
 
         Self::handle_response(response)
+    }
+
+    // Card operations
+
+    pub fn update_card_description(&self, card_id: &str, description: &str) -> Result<Card> {
+        let path = format!("/cards/{}", card_id);
+        let body = UpdateCardDesc {
+            desc: description.to_string(),
+        };
+        self.put(&path, &body)
     }
 }
 
