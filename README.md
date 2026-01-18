@@ -26,3 +26,15 @@ Run:
 ```bash
 cargo run -- --help
 ```
+
+## Usage
+
+```bash
+trello card update-desc <CARD_ID> <DESCRIPTION>
+trello card label <CARD_ID> <LABEL_NAME>
+trello card archive <CARD_ID>
+trello card move <CARD_ID> <POSITION>
+trello list move <LIST_ID> <POSITION>
+```
+
+Position values: `top`, `bottom`, or a numeric value.
