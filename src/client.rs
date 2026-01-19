@@ -5,7 +5,7 @@ use reqwest::blocking::Client;
 use serde::{Serialize, de::DeserializeOwned};
 use std::env;
 
-use crate::models::{AddLabel, Card, Label, UpdateCardDesc};
+use crate::models::{AddLabel, ArchiveCard, Card, Label, UpdateCardDesc};
 
 const BASE_URL: &str = "https://api.trello.com/1";
 
@@ -173,6 +173,16 @@ impl TrelloClient {
             self.remove_label_from_card(card_id, &label.id)?;
         }
 
+        Ok(card.name)
+    }
+
+    pub fn archive_card(&self, card_id: &str) -> Result<String> {
+        let card = self.get_card(card_id)?;
+        if !card.closed {
+            let path = format!("/cards/{}", card_id);
+            let body = ArchiveCard { closed: true };
+            self.put::<Card, _>(&path, &body)?;
+        }
         Ok(card.name)
     }
 }
