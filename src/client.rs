@@ -5,7 +5,7 @@ use reqwest::blocking::Client;
 use serde::{Serialize, de::DeserializeOwned};
 use std::env;
 
-use crate::models::{Card, UpdateCardDesc};
+use crate::models::{AddLabel, Card, Label, UpdateCardDesc};
 
 const BASE_URL: &str = "https://api.trello.com/1";
 
@@ -86,6 +86,23 @@ impl TrelloClient {
         Self::handle_response(response)
     }
 
+    pub fn delete(&self, path: &str) -> Result<()> {
+        let url = self.add_auth(&self.build_url(path));
+        let response = self
+            .client
+            .delete(&url)
+            .send()
+            .context("Failed to send DELETE request")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().unwrap_or_default();
+            anyhow::bail!("API request failed with status {}: {}", status, body);
+        }
+
+        Ok(())
+    }
+
     // Card operations
 
     pub fn update_card_description(&self, card_id: &str, description: &str) -> Result<Card> {
@@ -94,6 +111,69 @@ impl TrelloClient {
             desc: description.to_string(),
         };
         self.put(&path, &body)
+    }
+
+    pub fn get_card(&self, card_id: &str) -> Result<Card> {
+        let path = format!("/cards/{}", card_id);
+        self.get(&path)
+    }
+
+    pub fn get_board_labels(&self, board_id: &str) -> Result<Vec<Label>> {
+        let path = format!("/boards/{}/labels", board_id);
+        self.get(&path)
+    }
+
+    pub fn add_label_to_card(&self, card_id: &str, label_id: &str) -> Result<Vec<String>> {
+        let path = format!("/cards/{}/idLabels", card_id);
+        let body = AddLabel {
+            value: label_id.to_string(),
+        };
+        self.post(&path, &body)
+    }
+
+    /// Apply a label by name to a card.
+    /// Fetches the card to get its board, then finds the label by name.
+    /// Returns the card name for confirmation messages.
+    pub fn apply_label_by_name(&self, card_id: &str, label_name: &str) -> Result<String> {
+        let card = self.get_card(card_id)?;
+        let labels = self.get_board_labels(&card.id_board)?;
+
+        let label = labels
+            .iter()
+            .find(|l| l.name.eq_ignore_ascii_case(label_name))
+            .ok_or_else(|| anyhow::anyhow!("Label '{}' not found on board", label_name))?;
+
+        // Check if label is already applied
+        if !card.id_labels.contains(&label.id) {
+            self.add_label_to_card(card_id, &label.id)?;
+        }
+
+        Ok(card.name)
+    }
+
+    pub fn remove_label_from_card(&self, card_id: &str, label_id: &str) -> Result<()> {
+        let path = format!("/cards/{}/idLabels/{}", card_id, label_id);
+        self.delete(&path)
+    }
+
+    /// Remove a label by name from a card.
+    /// Fetches the card to get its board, then finds the label by name.
+    /// Returns the card name for confirmation messages.
+    pub fn remove_label_by_name(&self, card_id: &str, label_name: &str) -> Result<String> {
+        let card = self.get_card(card_id)?;
+        let labels = self.get_board_labels(&card.id_board)?;
+
+        let label = labels
+            .iter()
+            .find(|l| l.name.eq_ignore_ascii_case(label_name))
+            .ok_or_else(|| anyhow::anyhow!("Label '{}' not found on board", label_name))?;
+
+        // Only remove if label is applied
+        if card.id_labels.contains(&label.id) {
+            self.remove_label_from_card(card_id, &label.id)?;
+        }
+
+        Ok(card.name)
     }
 }
 

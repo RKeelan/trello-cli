@@ -11,6 +11,8 @@ pub struct Card {
     pub desc: String,
     #[serde(rename = "idBoard")]
     pub id_board: String,
+    #[serde(rename = "idLabels", default)]
+    pub id_labels: Vec<String>,
     #[serde(default)]
     pub closed: bool,
 }
@@ -19,4 +21,19 @@ pub struct Card {
 #[derive(Debug, Serialize)]
 pub struct UpdateCardDesc {
     pub desc: String,
+}
+
+/// Represents a Trello label
+#[derive(Debug, Deserialize)]
+pub struct Label {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+/// Request body for adding a label to a card
+#[derive(Debug, Serialize)]
+pub struct AddLabel {
+    pub value: String,
 }

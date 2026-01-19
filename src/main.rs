@@ -37,12 +37,15 @@ enum CardCommands {
         /// The new description
         description: String,
     },
-    /// Apply a label to a card
+    /// Apply or remove a label from a card
     Label {
         /// The card ID
         card_id: String,
         /// The label name
         label_name: String,
+        /// Remove the label instead of applying it
+        #[arg(long)]
+        clear: bool,
     },
     /// Archive a card
     Archive {
@@ -90,10 +93,17 @@ fn run() -> Result<()> {
                 println!("Updated card '{}' description", card.name);
             }
             CardCommands::Label {
-                card_id: _,
-                label_name: _,
+                card_id,
+                label_name,
+                clear,
             } => {
-                todo!("Apply label to card")
+                if clear {
+                    let card_name = client.remove_label_by_name(&card_id, &label_name)?;
+                    println!("Removed label '{}' from card '{}'", label_name, card_name);
+                } else {
+                    let card_name = client.apply_label_by_name(&card_id, &label_name)?;
+                    println!("Applied label '{}' to card '{}'", label_name, card_name);
+                }
             }
             CardCommands::Archive { card_id: _ } => {
                 todo!("Archive card")
@@ -156,9 +166,39 @@ mod tests {
                 CardCommands::Label {
                     card_id,
                     label_name,
+                    clear,
                 } => {
                     assert_eq!(card_id, "abc123");
                     assert_eq!(label_name, "In-Progress");
+                    assert!(!clear);
+                }
+                _ => panic!("Expected Label command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_label_clear() {
+        let cli = Cli::try_parse_from([
+            "trello",
+            "card",
+            "label",
+            "abc123",
+            "In-Progress",
+            "--clear",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Label {
+                    card_id,
+                    label_name,
+                    clear,
+                } => {
+                    assert_eq!(card_id, "abc123");
+                    assert_eq!(label_name, "In-Progress");
+                    assert!(clear);
                 }
                 _ => panic!("Expected Label command"),
             },
