@@ -5,7 +5,10 @@ use reqwest::blocking::Client;
 use serde::{Serialize, de::DeserializeOwned};
 use std::env;
 
-use crate::models::{AddLabel, ArchiveCard, Card, Label, UpdateCardDesc, UpdateCardPosition};
+use crate::models::{
+    AddLabel, ArchiveCard, Card, Label, List, UpdateCardDesc, UpdateCardPosition,
+    UpdateListPosition,
+};
 
 const BASE_URL: &str = "https://api.trello.com/1";
 
@@ -222,6 +225,52 @@ impl TrelloClient {
 
         let path = format!("/cards/{}", card_id);
         let body = UpdateCardPosition { pos: pos_value };
+        self.put(&path, &body)
+    }
+
+    // List operations
+
+    pub fn get_list(&self, list_id: &str) -> Result<List> {
+        let path = format!("/lists/{}", list_id);
+        self.get(&path)
+    }
+
+    pub fn get_board_lists(&self, board_id: &str) -> Result<Vec<List>> {
+        let path = format!("/boards/{}/lists", board_id);
+        self.get(&path)
+    }
+
+    pub fn move_list(&self, list_id: &str, position: &str) -> Result<List> {
+        let pos_value = match position {
+            "top" | "bottom" => position.to_string(),
+            _ => {
+                if let Ok(target_pos) = position.parse::<usize>() {
+                    let list = self.get_list(list_id)?;
+                    let mut lists: Vec<List> = self
+                        .get_board_lists(&list.id_board)?
+                        .into_iter()
+                        .filter(|l| l.id != list.id)
+                        .collect();
+                    lists.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap());
+
+                    if target_pos <= 1 || lists.is_empty() {
+                        "top".to_string()
+                    } else if target_pos > lists.len() {
+                        "bottom".to_string()
+                    } else {
+                        // Position between lists[target_pos-2] and lists[target_pos-1]
+                        let before = lists[target_pos - 2].pos;
+                        let after = lists[target_pos - 1].pos;
+                        ((before + after) / 2.0).to_string()
+                    }
+                } else {
+                    position.to_string()
+                }
+            }
+        };
+
+        let path = format!("/lists/{}", list_id);
+        let body = UpdateListPosition { pos: pos_value };
         self.put(&path, &body)
     }
 }
