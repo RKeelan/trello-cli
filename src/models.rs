@@ -37,3 +37,9 @@ pub struct Label {
 pub struct AddLabel {
     pub value: String,
 }
+
+/// Request body for archiving a card
+#[derive(Debug, Serialize)]
+pub struct ArchiveCard {
+    pub closed: bool,
+}
