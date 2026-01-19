@@ -109,11 +109,9 @@ fn run() -> Result<()> {
                 let card_name = client.archive_card(&card_id)?;
                 println!("Archived card '{}'", card_name);
             }
-            CardCommands::Move {
-                card_id: _,
-                position: _,
-            } => {
-                todo!("Move card")
+            CardCommands::Move { card_id, position } => {
+                let card = client.move_card(&card_id, &position)?;
+                println!("Moved card '{}' to position {}", card.name, position);
             }
         },
         Commands::List { command } => match command {
