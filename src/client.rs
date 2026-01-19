@@ -186,11 +186,42 @@ impl TrelloClient {
         Ok(card.name)
     }
 
+    pub fn get_list_cards(&self, list_id: &str) -> Result<Vec<Card>> {
+        let path = format!("/lists/{}/cards", list_id);
+        self.get(&path)
+    }
+
     pub fn move_card(&self, card_id: &str, position: &str) -> Result<Card> {
-        let path = format!("/cards/{}", card_id);
-        let body = UpdateCardPosition {
-            pos: position.to_string(),
+        let pos_value = match position {
+            "top" | "bottom" => position.to_string(),
+            _ => {
+                if let Ok(target_pos) = position.parse::<usize>() {
+                    let card = self.get_card(card_id)?;
+                    let mut cards: Vec<Card> = self
+                        .get_list_cards(&card.id_list)?
+                        .into_iter()
+                        .filter(|c| c.id != card.id)
+                        .collect();
+                    cards.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap());
+
+                    if target_pos <= 1 || cards.is_empty() {
+                        "top".to_string()
+                    } else if target_pos > cards.len() {
+                        "bottom".to_string()
+                    } else {
+                        // Position between cards[target_pos-2] and cards[target_pos-1]
+                        let before = cards[target_pos - 2].pos;
+                        let after = cards[target_pos - 1].pos;
+                        ((before + after) / 2.0).to_string()
+                    }
+                } else {
+                    position.to_string()
+                }
+            }
         };
+
+        let path = format!("/cards/{}", card_id);
+        let body = UpdateCardPosition { pos: pos_value };
         self.put(&path, &body)
     }
 }

@@ -11,10 +11,13 @@ pub struct Card {
     pub desc: String,
     #[serde(rename = "idBoard")]
     pub id_board: String,
+    #[serde(rename = "idList")]
+    pub id_list: String,
     #[serde(rename = "idLabels", default)]
     pub id_labels: Vec<String>,
     #[serde(default)]
     pub closed: bool,
+    pub pos: f64,
 }
 
 /// Request body for updating a card's description
