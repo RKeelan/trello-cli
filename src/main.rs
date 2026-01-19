@@ -105,8 +105,9 @@ fn run() -> Result<()> {
                     println!("Applied label '{}' to card '{}'", label_name, card_name);
                 }
             }
-            CardCommands::Archive { card_id: _ } => {
-                todo!("Archive card")
+            CardCommands::Archive { card_id } => {
+                let card_name = client.archive_card(&card_id)?;
+                println!("Archived card '{}'", card_name);
             }
             CardCommands::Move {
                 card_id: _,
