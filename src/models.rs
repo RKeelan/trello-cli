@@ -43,3 +43,9 @@ pub struct AddLabel {
 pub struct ArchiveCard {
     pub closed: bool,
 }
+
+/// Request body for updating a card's position
+#[derive(Debug, Serialize)]
+pub struct UpdateCardPosition {
+    pub pos: String,
+}

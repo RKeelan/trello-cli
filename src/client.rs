@@ -5,7 +5,7 @@ use reqwest::blocking::Client;
 use serde::{Serialize, de::DeserializeOwned};
 use std::env;
 
-use crate::models::{AddLabel, ArchiveCard, Card, Label, UpdateCardDesc};
+use crate::models::{AddLabel, ArchiveCard, Card, Label, UpdateCardDesc, UpdateCardPosition};
 
 const BASE_URL: &str = "https://api.trello.com/1";
 
@@ -184,6 +184,14 @@ impl TrelloClient {
             self.put::<Card, _>(&path, &body)?;
         }
         Ok(card.name)
+    }
+
+    pub fn move_card(&self, card_id: &str, position: &str) -> Result<Card> {
+        let path = format!("/cards/{}", card_id);
+        let body = UpdateCardPosition {
+            pos: position.to_string(),
+        };
+        self.put(&path, &body)
     }
 }
 

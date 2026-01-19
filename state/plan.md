@@ -1,37 +1,5 @@
 # Remaining Implementation Plan
 
-## Step 7: Implement card position change
-
-### Models
-Add to `src/models.rs`:
-```rust
-#[derive(Debug, Serialize)]
-pub struct UpdateCardPosition {
-    pub pos: String,
-}
-```
-
-### Client
-Add to `src/client.rs`:
-```rust
-pub fn move_card(&self, card_id: &str, position: &str) -> Result<Card> {
-    let path = format!("/cards/{}", card_id);
-    let body = UpdateCardPosition { pos: position.to_string() };
-    self.put(&path, &body)
-}
-```
-
-### Main
-Update `CardCommands::Move` handler:
-```rust
-CardCommands::Move { card_id, position } => {
-    let card = client.move_card(&card_id, &position)?;
-    println!("Moved card '{}' to position {}", card.name, position);
-}
-```
-
----
-
 ## Step 8: Implement list position change
 
 ### Models
