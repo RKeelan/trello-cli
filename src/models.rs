@@ -52,3 +52,19 @@ pub struct ArchiveCard {
 pub struct UpdateCardPosition {
     pub pos: String,
 }
+
+/// Represents a Trello list
+#[derive(Debug, Deserialize)]
+pub struct List {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "idBoard")]
+    pub id_board: String,
+    pub pos: f64,
+}
+
+/// Request body for updating a list's position
+#[derive(Debug, Serialize)]
+pub struct UpdateListPosition {
+    pub pos: String,
+}
