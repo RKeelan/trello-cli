@@ -115,11 +115,9 @@ fn run() -> Result<()> {
             }
         },
         Commands::List { command } => match command {
-            ListCommands::Move {
-                list_id: _,
-                position: _,
-            } => {
-                todo!("Move list")
+            ListCommands::Move { list_id, position } => {
+                let list = client.move_list(&list_id, &position)?;
+                println!("Moved list '{}' to position {}", list.name, position);
             }
         },
     }
