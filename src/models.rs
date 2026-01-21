@@ -2,8 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Represents a Trello board
+#[derive(Debug, Deserialize, Clone)]
+pub struct Board {
+    pub id: String,
+    pub name: String,
+}
+
 /// Represents a Trello card
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Card {
     pub id: String,
     pub name: String,
@@ -54,7 +61,7 @@ pub struct UpdateCardPosition {
 }
 
 /// Represents a Trello list
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct List {
     pub id: String,
     pub name: String,
