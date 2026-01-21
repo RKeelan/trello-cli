@@ -6,7 +6,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::config::Config;
 use crate::models::{
-    AddLabel, ArchiveCard, Card, Label, List, UpdateCardDesc, UpdateCardPosition,
+    AddLabel, ArchiveCard, Board, Card, Label, List, UpdateCardDesc, UpdateCardPosition,
     UpdateListPosition,
 };
 
@@ -272,6 +272,22 @@ impl TrelloClient {
         let path = format!("/lists/{}", list_id);
         let body = UpdateListPosition { pos: pos_value };
         self.put(&path, &body)
+    }
+
+    // Board operations
+
+    pub fn get_member_boards(&self) -> Result<Vec<Board>> {
+        self.get("/members/me/boards?filter=open")
+    }
+
+    pub fn get_board(&self, board_id: &str) -> Result<Board> {
+        let path = format!("/boards/{}", board_id);
+        self.get(&path)
+    }
+
+    pub fn get_board_cards(&self, board_id: &str) -> Result<Vec<Card>> {
+        let path = format!("/boards/{}/cards", board_id);
+        self.get(&path)
     }
 }
 
