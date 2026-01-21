@@ -6,6 +6,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use client::TrelloClient;
+use config::Config;
 
 #[derive(Parser)]
 #[command(name = "trello")]
@@ -82,7 +83,8 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let client = TrelloClient::from_env()?;
+    let config = Config::load()?;
+    let client = TrelloClient::new(&config);
 
     match cli.command {
         Commands::Card { command } => match command {

@@ -3,8 +3,8 @@
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
 use serde::{Serialize, de::DeserializeOwned};
-use std::env;
 
+use crate::config::Config;
 use crate::models::{
     AddLabel, ArchiveCard, Card, Label, List, UpdateCardDesc, UpdateCardPosition,
     UpdateListPosition,
@@ -19,17 +19,17 @@ pub struct TrelloClient {
 }
 
 impl TrelloClient {
-    pub fn from_env() -> Result<Self> {
-        let api_key =
-            env::var("TRELLO_API_KEY").context("TRELLO_API_KEY environment variable not set")?;
-        let api_token = env::var("TRELLO_API_TOKEN")
-            .context("TRELLO_API_TOKEN environment variable not set")?;
-
-        Ok(Self {
+    pub fn new(config: &Config) -> Self {
+        Self {
             client: Client::new(),
-            api_key,
-            api_token,
-        })
+            api_key: config.api_key().to_string(),
+            api_token: config.api_token().to_string(),
+        }
+    }
+
+    pub fn from_env() -> Result<Self> {
+        let config = Config::load()?;
+        Ok(Self::new(&config))
     }
 
     fn build_url(&self, path: &str) -> String {
@@ -312,5 +312,52 @@ mod tests {
             url,
             "https://api.trello.com/1/cards/123?fields=name&key=test_key&token=test_token"
         );
+    }
+
+    #[test]
+    fn client_new_from_config() {
+        use std::fs;
+        use std::io::Write;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        let mut file = fs::File::create(&config_path).unwrap();
+        writeln!(file, "api_key = \"config_key\"").unwrap();
+        writeln!(file, "api_token = \"config_token\"").unwrap();
+
+        // Clear env vars to force file-based loading
+        // SAFETY: Tests run with --test-threads=1
+        unsafe {
+            std::env::remove_var("TRELLO_API_KEY");
+            std::env::remove_var("TRELLO_API_TOKEN");
+        }
+
+        let config = Config::load_from_path(config_path).unwrap();
+        let client = TrelloClient::new(&config);
+
+        assert_eq!(client.api_key, "config_key");
+        assert_eq!(client.api_token, "config_token");
+    }
+
+    #[test]
+    fn from_env_delegates_to_config_load() {
+        // Set env vars so Config::load() succeeds
+        // SAFETY: Tests run with --test-threads=1
+        unsafe {
+            std::env::set_var("TRELLO_API_KEY", "env_key");
+            std::env::set_var("TRELLO_API_TOKEN", "env_token");
+        }
+
+        let client = TrelloClient::from_env().unwrap();
+
+        assert_eq!(client.api_key, "env_key");
+        assert_eq!(client.api_token, "env_token");
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("TRELLO_API_KEY");
+            std::env::remove_var("TRELLO_API_TOKEN");
+        }
     }
 }
