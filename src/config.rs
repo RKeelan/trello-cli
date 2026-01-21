@@ -4,6 +4,20 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+/// Trait for abstracting environment variable access, enabling testability.
+pub(crate) trait CredentialSource {
+    fn get(&self, key: &str) -> Option<String>;
+}
+
+/// Default implementation that reads from actual environment variables.
+struct EnvSource;
+
+impl CredentialSource for EnvSource {
+    fn get(&self, key: &str) -> Option<String> {
+        env::var(key).ok()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
     api_key: String,
@@ -25,24 +39,27 @@ impl Config {
     }
 
     pub fn load_from_path(config_path: PathBuf) -> Result<Self> {
+        Self::load_from_source(&EnvSource, config_path)
+    }
+
+    pub(crate) fn load_from_source(
+        source: &impl CredentialSource,
+        config_path: PathBuf,
+    ) -> Result<Self> {
         // Try environment variables first (both must be set)
-        let key_env = env::var("TRELLO_API_KEY").ok();
-        let token_env = env::var("TRELLO_API_TOKEN").ok();
+        let key_env = source.get("TRELLO_API_KEY");
+        let token_env = source.get("TRELLO_API_TOKEN");
 
-        if let (Some(api_key), Some(api_token)) = (key_env.as_ref(), token_env.as_ref()) {
-            return Ok(Config {
-                api_key: api_key.clone(),
-                api_token: api_token.clone(),
-            });
+        match (key_env, token_env) {
+            (Some(api_key), Some(api_token)) => Ok(Config { api_key, api_token }),
+            (Some(_), None) | (None, Some(_)) => {
+                Self::load_from_file(config_path, "only one set (both required)")
+            }
+            (None, None) => Self::load_from_file(config_path, "not set"),
         }
+    }
 
-        // Try config file
-        let env_status = if key_env.is_some() || token_env.is_some() {
-            "only one set (both required)"
-        } else {
-            "not set"
-        };
-
+    fn load_from_file(config_path: PathBuf, env_status: &str) -> Result<Self> {
         if config_path.exists() {
             let contents = fs::read_to_string(&config_path).with_context(|| {
                 format!(
@@ -88,230 +105,188 @@ impl Config {
     }
 }
 
-/// Note: Config tests modify environment variables and must be run single-threaded:
-/// `cargo test -- --test-threads=1`
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use std::io::Write;
     use tempfile::TempDir;
 
-    fn with_env_vars<F, R>(vars: &[(&str, Option<&str>)], f: F) -> R
-    where
-        F: FnOnce() -> R,
-    {
-        // Save original values
-        let originals: Vec<_> = vars.iter().map(|(k, _)| (*k, env::var(*k).ok())).collect();
+    /// Mock credential source for testing without environment variable manipulation.
+    struct MockSource(HashMap<String, String>);
 
-        // Set new values
-        // SAFETY: Tests are run with --test-threads=1 to avoid concurrent env var modifications
-        for (key, value) in vars {
-            match value {
-                Some(v) => unsafe { env::set_var(key, v) },
-                None => unsafe { env::remove_var(key) },
-            }
+    impl MockSource {
+        fn new() -> Self {
+            MockSource(HashMap::new())
         }
 
-        let result = f();
-
-        // Restore original values
-        // SAFETY: Tests are run with --test-threads=1 to avoid concurrent env var modifications
-        for (key, original) in originals {
-            match original {
-                Some(v) => unsafe { env::set_var(key, v) },
-                None => unsafe { env::remove_var(key) },
-            }
+        fn with(vars: &[(&str, &str)]) -> Self {
+            let map = vars
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            MockSource(map)
         }
+    }
 
-        result
+    impl CredentialSource for MockSource {
+        fn get(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
     }
 
     #[test]
     fn config_from_env_vars() {
-        with_env_vars(
-            &[
-                ("TRELLO_API_KEY", Some("env_key")),
-                ("TRELLO_API_TOKEN", Some("env_token")),
-            ],
-            || {
-                let config = Config::load().unwrap();
-                assert_eq!(config.api_key(), "env_key");
-                assert_eq!(config.api_token(), "env_token");
-            },
-        );
+        let source = MockSource::with(&[
+            ("TRELLO_API_KEY", "env_key"),
+            ("TRELLO_API_TOKEN", "env_token"),
+        ]);
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+
+        let config = Config::load_from_source(&source, config_path).unwrap();
+        assert_eq!(config.api_key(), "env_key");
+        assert_eq!(config.api_token(), "env_token");
     }
 
     #[test]
     fn config_from_file() {
-        with_env_vars(
-            &[("TRELLO_API_KEY", None), ("TRELLO_API_TOKEN", None)],
-            || {
-                let temp_dir = TempDir::new().unwrap();
-                let config_path = temp_dir.path().join("config.toml");
-                let mut file = fs::File::create(&config_path).unwrap();
-                writeln!(file, "api_key = \"file_key\"").unwrap();
-                writeln!(file, "api_token = \"file_token\"").unwrap();
+        let source = MockSource::new();
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        let mut file = fs::File::create(&config_path).unwrap();
+        writeln!(file, "api_key = \"file_key\"").unwrap();
+        writeln!(file, "api_token = \"file_token\"").unwrap();
 
-                let config = Config::load_from_path(config_path).unwrap();
-                assert_eq!(config.api_key(), "file_key");
-                assert_eq!(config.api_token(), "file_token");
-            },
-        );
+        let config = Config::load_from_source(&source, config_path).unwrap();
+        assert_eq!(config.api_key(), "file_key");
+        assert_eq!(config.api_token(), "file_token");
     }
 
     #[test]
     fn env_vars_override_file() {
         // When both env vars are set, they take precedence even if file exists
-        with_env_vars(
-            &[
-                ("TRELLO_API_KEY", Some("env_key")),
-                ("TRELLO_API_TOKEN", Some("env_token")),
-            ],
-            || {
-                let temp_dir = TempDir::new().unwrap();
-                let config_path = temp_dir.path().join("config.toml");
-                let mut file = fs::File::create(&config_path).unwrap();
-                writeln!(file, "api_key = \"file_key\"").unwrap();
-                writeln!(file, "api_token = \"file_token\"").unwrap();
+        let source = MockSource::with(&[
+            ("TRELLO_API_KEY", "env_key"),
+            ("TRELLO_API_TOKEN", "env_token"),
+        ]);
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        let mut file = fs::File::create(&config_path).unwrap();
+        writeln!(file, "api_key = \"file_key\"").unwrap();
+        writeln!(file, "api_token = \"file_token\"").unwrap();
 
-                let config = Config::load_from_path(config_path).unwrap();
-                assert_eq!(config.api_key(), "env_key");
-                assert_eq!(config.api_token(), "env_token");
-            },
-        );
+        let config = Config::load_from_source(&source, config_path).unwrap();
+        assert_eq!(config.api_key(), "env_key");
+        assert_eq!(config.api_token(), "env_token");
     }
 
     #[test]
     fn partial_env_vars_uses_file() {
         // When only one env var is set, it falls through to file
-        with_env_vars(
-            &[
-                ("TRELLO_API_KEY", Some("only_key")),
-                ("TRELLO_API_TOKEN", None),
-            ],
-            || {
-                let temp_dir = TempDir::new().unwrap();
-                let config_path = temp_dir.path().join("config.toml");
-                let mut file = fs::File::create(&config_path).unwrap();
-                writeln!(file, "api_key = \"file_key\"").unwrap();
-                writeln!(file, "api_token = \"file_token\"").unwrap();
+        let source = MockSource::with(&[("TRELLO_API_KEY", "only_key")]);
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        let mut file = fs::File::create(&config_path).unwrap();
+        writeln!(file, "api_key = \"file_key\"").unwrap();
+        writeln!(file, "api_token = \"file_token\"").unwrap();
 
-                // Should use file credentials, not the partial env var
-                let config = Config::load_from_path(config_path).unwrap();
-                assert_eq!(config.api_key(), "file_key");
-                assert_eq!(config.api_token(), "file_token");
-            },
-        );
+        // Should use file credentials, not the partial env var
+        let config = Config::load_from_source(&source, config_path).unwrap();
+        assert_eq!(config.api_key(), "file_key");
+        assert_eq!(config.api_token(), "file_token");
     }
 
     #[test]
     fn missing_credentials_error() {
-        with_env_vars(
-            &[("TRELLO_API_KEY", None), ("TRELLO_API_TOKEN", None)],
-            || {
-                let temp_dir = TempDir::new().unwrap();
-                let config_path = temp_dir.path().join("config.toml");
-                // Don't create the file - test the "not found" case
+        let source = MockSource::new();
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        // Don't create the file - test the "not found" case
 
-                let result = Config::load_from_path(config_path.clone());
-                assert!(result.is_err());
-                let err = result.unwrap_err().to_string();
-                assert!(
-                    err.contains("Failed to load Trello credentials"),
-                    "Error was: {}",
-                    err
-                );
-                assert!(
-                    err.contains(
-                        "Environment variables TRELLO_API_KEY and TRELLO_API_TOKEN: not set"
-                    ),
-                    "Error was: {}",
-                    err
-                );
-                assert!(
-                    err.contains(&config_path.display().to_string()),
-                    "Error was: {}",
-                    err
-                );
-                assert!(err.contains("not found"), "Error was: {}", err);
-            },
+        let result = Config::load_from_source(&source, config_path.clone());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Failed to load Trello credentials"),
+            "Error was: {}",
+            err
         );
+        assert!(
+            err.contains("Environment variables TRELLO_API_KEY and TRELLO_API_TOKEN: not set"),
+            "Error was: {}",
+            err
+        );
+        assert!(
+            err.contains(&config_path.display().to_string()),
+            "Error was: {}",
+            err
+        );
+        assert!(err.contains("not found"), "Error was: {}", err);
     }
 
     #[test]
     fn malformed_toml_error() {
-        with_env_vars(
-            &[("TRELLO_API_KEY", None), ("TRELLO_API_TOKEN", None)],
-            || {
-                let temp_dir = TempDir::new().unwrap();
-                let config_path = temp_dir.path().join("config.toml");
-                fs::write(&config_path, "this is not valid toml {{{").unwrap();
+        let source = MockSource::new();
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        fs::write(&config_path, "this is not valid toml {{{").unwrap();
 
-                let result = Config::load_from_path(config_path.clone());
-                assert!(result.is_err());
-                let err = result.unwrap_err().to_string();
-                // Error should include file path
-                assert!(
-                    err.contains(&config_path.display().to_string()),
-                    "Error was: {}",
-                    err
-                );
-                // TOML parse errors include details about what went wrong
-                assert!(
-                    err.contains("parse") || err.contains("expected") || err.contains("invalid"),
-                    "Error was: {}",
-                    err
-                );
-            },
+        let result = Config::load_from_source(&source, config_path.clone());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        // Error should include file path
+        assert!(
+            err.contains(&config_path.display().to_string()),
+            "Error was: {}",
+            err
+        );
+        // TOML parse errors include details about what went wrong
+        assert!(
+            err.contains("parse") || err.contains("expected") || err.contains("invalid"),
+            "Error was: {}",
+            err
         );
     }
 
     #[test]
     fn partial_credentials_in_file_error() {
-        with_env_vars(
-            &[("TRELLO_API_KEY", None), ("TRELLO_API_TOKEN", None)],
-            || {
-                let temp_dir = TempDir::new().unwrap();
-                let config_path = temp_dir.path().join("config.toml");
-                // Only api_key, missing api_token (empty string means missing)
-                fs::write(&config_path, "api_key = \"only_key\"\napi_token = \"\"").unwrap();
+        let source = MockSource::new();
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        // Only api_key, missing api_token (empty string means missing)
+        fs::write(&config_path, "api_key = \"only_key\"\napi_token = \"\"").unwrap();
 
-                let result = Config::load_from_path(config_path.clone());
-                assert!(result.is_err());
-                let err = result.unwrap_err().to_string();
-                assert!(
-                    err.contains(&config_path.display().to_string()),
-                    "Error was: {}",
-                    err
-                );
-                assert!(err.contains("api_token"), "Error was: {}", err);
-                assert!(err.contains("missing"), "Error was: {}", err);
-            },
+        let result = Config::load_from_source(&source, config_path.clone());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains(&config_path.display().to_string()),
+            "Error was: {}",
+            err
         );
+        assert!(err.contains("api_token"), "Error was: {}", err);
+        assert!(err.contains("missing"), "Error was: {}", err);
     }
 
     #[test]
     fn partial_credentials_in_file_error_missing_key() {
-        with_env_vars(
-            &[("TRELLO_API_KEY", None), ("TRELLO_API_TOKEN", None)],
-            || {
-                let temp_dir = TempDir::new().unwrap();
-                let config_path = temp_dir.path().join("config.toml");
-                // Only api_token, missing api_key (empty string means missing)
-                fs::write(&config_path, "api_key = \"\"\napi_token = \"only_token\"").unwrap();
+        let source = MockSource::new();
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        // Only api_token, missing api_key (empty string means missing)
+        fs::write(&config_path, "api_key = \"\"\napi_token = \"only_token\"").unwrap();
 
-                let result = Config::load_from_path(config_path.clone());
-                assert!(result.is_err());
-                let err = result.unwrap_err().to_string();
-                assert!(
-                    err.contains(&config_path.display().to_string()),
-                    "Error was: {}",
-                    err
-                );
-                assert!(err.contains("api_key"), "Error was: {}", err);
-                assert!(err.contains("missing"), "Error was: {}", err);
-            },
+        let result = Config::load_from_source(&source, config_path.clone());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains(&config_path.display().to_string()),
+            "Error was: {}",
+            err
         );
+        assert!(err.contains("api_key"), "Error was: {}", err);
+        assert!(err.contains("missing"), "Error was: {}", err);
     }
 
     #[test]

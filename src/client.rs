@@ -294,12 +294,36 @@ impl TrelloClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::CredentialSource;
+    use std::collections::HashMap;
 
     fn test_client() -> TrelloClient {
         TrelloClient {
             client: Client::new(),
             api_key: "test_key".to_string(),
             api_token: "test_token".to_string(),
+        }
+    }
+
+    struct MockSource(HashMap<String, String>);
+
+    impl MockSource {
+        fn new() -> Self {
+            MockSource(HashMap::new())
+        }
+
+        fn with(vars: &[(&str, &str)]) -> Self {
+            let map = vars
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            MockSource(map)
+        }
+    }
+
+    impl CredentialSource for MockSource {
+        fn get(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
         }
     }
 
@@ -342,14 +366,9 @@ mod tests {
         writeln!(file, "api_key = \"config_key\"").unwrap();
         writeln!(file, "api_token = \"config_token\"").unwrap();
 
-        // Clear env vars to force file-based loading
-        // SAFETY: Tests run with --test-threads=1
-        unsafe {
-            std::env::remove_var("TRELLO_API_KEY");
-            std::env::remove_var("TRELLO_API_TOKEN");
-        }
-
-        let config = Config::load_from_path(config_path).unwrap();
+        // Use empty mock source to force file-based loading
+        let source = MockSource::new();
+        let config = Config::load_from_source(&source, config_path).unwrap();
         let client = TrelloClient::new(&config);
 
         assert_eq!(client.api_key, "config_key");
@@ -357,23 +376,21 @@ mod tests {
     }
 
     #[test]
-    fn from_env_delegates_to_config_load() {
-        // Set env vars so Config::load() succeeds
-        // SAFETY: Tests run with --test-threads=1
-        unsafe {
-            std::env::set_var("TRELLO_API_KEY", "env_key");
-            std::env::set_var("TRELLO_API_TOKEN", "env_token");
-        }
+    fn client_new_from_env_source() {
+        use tempfile::TempDir;
 
-        let client = TrelloClient::from_env().unwrap();
+        let source = MockSource::with(&[
+            ("TRELLO_API_KEY", "env_key"),
+            ("TRELLO_API_TOKEN", "env_token"),
+        ]);
+
+        // Config path doesn't need to exist when env vars are set
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        let config = Config::load_from_source(&source, config_path).unwrap();
+        let client = TrelloClient::new(&config);
 
         assert_eq!(client.api_key, "env_key");
         assert_eq!(client.api_token, "env_token");
-
-        // Clean up
-        unsafe {
-            std::env::remove_var("TRELLO_API_KEY");
-            std::env::remove_var("TRELLO_API_TOKEN");
-        }
     }
 }
