@@ -4,6 +4,40 @@
 
 A Rust CLI for Trello.
 
+## Usage
+
+```bash
+trello card update <CARD_ID> <DESCRIPTION>
+trello card label <CARD_ID> <LABEL_NAME> [-clear]
+trello card archive <CARD_ID>
+trello card move <CARD_ID> <POSITION>
+trello list move <LIST_ID> <POSITION>
+```
+
+Position values: `top`, `bottom`, or a numeric value.
+
+## Configuration
+
+Get your API key from https://trello.com/power-ups/admin and generate a token for it.
+
+### Option 1: Config file
+
+Create a config file at `~/.config/trello-cli/config.toml` (Linux) or `~/Library/Application Support/trello-cli/config.toml` (macOS):
+
+```toml
+api_key = "your_api_key"
+api_token = "your_api_token"
+```
+
+### Option 2: Environment variables
+
+```bash
+export TRELLO_API_KEY="your_api_key"
+export TRELLO_API_TOKEN="your_api_token"
+```
+
+Environment variables take precedence over the config file when both are set.
+
 ## Development
 
 Clone the repository:
@@ -26,26 +60,3 @@ Run:
 ```bash
 cargo run -- --help
 ```
-
-## Configuration
-
-Set the following environment variables:
-
-```bash
-export TRELLO_API_KEY="your_api_key"
-export TRELLO_API_TOKEN="your_api_token"
-```
-
-Get your API key from https://trello.com/power-ups/admin and generate a token for it.
-
-## Usage
-
-```bash
-trello card update <CARD_ID> <DESCRIPTION>
-trello card label <CARD_ID> <LABEL_NAME> [-clear]
-trello card archive <CARD_ID>
-trello card move <CARD_ID> <POSITION>
-trello list move <LIST_ID> <POSITION>
-```
-
-Position values: `top`, `bottom`, or a numeric value.

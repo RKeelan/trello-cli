@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Config will be used in Task 2 integration
-
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::env;
@@ -26,7 +24,7 @@ impl Config {
         Self::load_from_path(config_path)
     }
 
-    fn load_from_path(config_path: PathBuf) -> Result<Self> {
+    pub fn load_from_path(config_path: PathBuf) -> Result<Self> {
         // Try environment variables first (both must be set)
         let key_env = env::var("TRELLO_API_KEY").ok();
         let token_env = env::var("TRELLO_API_TOKEN").ok();
