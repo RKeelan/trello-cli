@@ -57,6 +57,9 @@ enum CardCommands {
     Archive {
         /// The card ID
         card_id: String,
+        /// Optional comment to add before archiving
+        #[arg(long)]
+        comment: Option<String>,
     },
     /// Change a card's position
     Move {
@@ -197,7 +200,18 @@ fn run() -> Result<()> {
                     println!("Applied label '{}' to card '{}'", label_name, card_name);
                 }
             }
-            CardCommands::Archive { card_id } => {
+            CardCommands::Archive { card_id, comment } => {
+                // Post comment first if provided and non-empty
+                if let Some(ref text) = comment {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        client
+                            .add_comment_to_card(&card_id, trimmed)
+                            .with_context(|| {
+                                format!("Failed to add comment to card '{}'", card_id)
+                            })?;
+                    }
+                }
                 let card_name = client.archive_card(&card_id)?;
                 println!("Archived card '{}'", card_name);
             }
@@ -518,8 +532,80 @@ mod tests {
         let cli = Cli::try_parse_from(["trello", "card", "archive", "abc123"]).unwrap();
         match cli.command {
             Commands::Card { command } => match command {
-                CardCommands::Archive { card_id } => {
+                CardCommands::Archive { card_id, comment } => {
                     assert_eq!(card_id, "abc123");
+                    assert_eq!(comment, None);
+                }
+                _ => panic!("Expected Archive command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_archive_with_comment() {
+        let cli = Cli::try_parse_from(["trello", "card", "archive", "abc123", "--comment", "Done"])
+            .unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Archive { card_id, comment } => {
+                    assert_eq!(card_id, "abc123");
+                    assert_eq!(comment, Some("Done".to_string()));
+                }
+                _ => panic!("Expected Archive command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_archive_with_multiword_comment() {
+        let cli = Cli::try_parse_from([
+            "trello",
+            "card",
+            "archive",
+            "abc123",
+            "--comment",
+            "Task completed successfully",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Archive { card_id, comment } => {
+                    assert_eq!(card_id, "abc123");
+                    assert_eq!(comment, Some("Task completed successfully".to_string()));
+                }
+                _ => panic!("Expected Archive command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_archive_with_empty_comment() {
+        let cli =
+            Cli::try_parse_from(["trello", "card", "archive", "abc123", "--comment", ""]).unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Archive { card_id, comment } => {
+                    assert_eq!(card_id, "abc123");
+                    assert_eq!(comment, Some("".to_string()));
+                }
+                _ => panic!("Expected Archive command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_archive_with_whitespace_comment() {
+        let cli = Cli::try_parse_from(["trello", "card", "archive", "abc123", "--comment", "   "])
+            .unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Archive { card_id, comment } => {
+                    assert_eq!(card_id, "abc123");
+                    assert_eq!(comment, Some("   ".to_string()));
                 }
                 _ => panic!("Expected Archive command"),
             },
@@ -893,5 +979,19 @@ mod tests {
         assert_eq!(parsed["date"], "2024-01-15 10:30");
         assert_eq!(parsed["author"], "Alice");
         assert_eq!(parsed["text"], "Test comment");
+    }
+
+    #[test]
+    fn test_add_comment_serialization() {
+        use crate::models::AddComment;
+
+        let add_comment = AddComment {
+            text: "Task completed successfully".to_string(),
+        };
+        let json = serde_json::to_string(&add_comment).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["text"], "Task completed successfully");
+        assert_eq!(parsed.as_object().unwrap().len(), 1);
     }
 }
