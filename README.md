@@ -62,3 +62,11 @@ Run:
 ```bash
 cargo run -- --help
 ```
+
+Install from source:
+```bash
+cargo install --path .
+```
+
+This installs the `trello` binary to `~/.cargo/bin/`. Ensure this directory is in your `PATH`.
+```
