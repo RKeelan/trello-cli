@@ -79,6 +79,17 @@ enum CardCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Show detailed information about a card
+    Show {
+        /// The card ID
+        card_id: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Include comments
+        #[arg(long)]
+        comments: bool,
+    },
 }
 
 #[derive(Serialize)]
@@ -87,6 +98,32 @@ struct CardResult {
     board: String,
     list: String,
     title: String,
+}
+
+#[derive(Serialize)]
+struct ShowCardResult {
+    id: String,
+    name: String,
+    board: String,
+    list: String,
+    labels: Vec<LabelInfo>,
+    description: String,
+    archived: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    comments: Option<Vec<CommentInfo>>,
+}
+
+#[derive(Serialize)]
+struct LabelInfo {
+    name: String,
+    color: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CommentInfo {
+    date: String,
+    author: String,
+    text: String,
 }
 
 fn looks_like_id(input: &str) -> bool {
@@ -100,6 +137,19 @@ fn sanitize_field(s: &str) -> String {
             _ => c,
         })
         .collect()
+}
+
+/// Format ISO 8601 date string to [YYYY-MM-DD HH:MM] format in UTC.
+fn format_comment_date(iso_date: &str) -> String {
+    // Parse "2020-03-09T19:41:51.396Z" -> "2020-03-09 19:41"
+    // Simple parsing: take first 16 chars (YYYY-MM-DDTHH:MM), replace T with space
+    if iso_date.len() >= 16 {
+        let date_part = &iso_date[..10];
+        let time_part = &iso_date[11..16];
+        format!("{} {}", date_part, time_part)
+    } else {
+        iso_date.to_string()
+    }
 }
 
 #[derive(Subcommand)]
@@ -256,6 +306,120 @@ fn run() -> Result<()> {
                             sanitize_field(&r.list),
                             sanitize_field(&r.title)
                         );
+                    }
+                }
+            }
+            CardCommands::Show {
+                card_id,
+                json,
+                comments: include_comments,
+            } => {
+                let card = client
+                    .get_card(&card_id)
+                    .with_context(|| format!("Failed to fetch card '{}'", card_id))?;
+                let board = client
+                    .get_board(&card.id_board)
+                    .with_context(|| format!("Failed to fetch board for card '{}'", card_id))?;
+                let list = client
+                    .get_list(&card.id_list)
+                    .with_context(|| format!("Failed to fetch list for card '{}'", card_id))?;
+
+                // Get board labels and filter to those on the card
+                let board_labels = client.get_board_labels(&card.id_board).with_context(|| {
+                    format!("Failed to fetch labels for board '{}'", board.name)
+                })?;
+                let labels: Vec<LabelInfo> = board_labels
+                    .into_iter()
+                    .filter(|l| card.id_labels.contains(&l.id))
+                    .map(|l| LabelInfo {
+                        name: l.name,
+                        color: l.color,
+                    })
+                    .collect();
+
+                // Fetch comments if requested
+                let comments = if include_comments {
+                    let mut actions = client.get_card_comments(&card_id).with_context(|| {
+                        format!("Failed to fetch comments for card '{}'", card_id)
+                    })?;
+                    // Reverse to get chronological order (oldest first)
+                    actions.reverse();
+                    let comment_infos: Vec<CommentInfo> = actions
+                        .into_iter()
+                        .map(|a| {
+                            let author = a
+                                .member_creator
+                                .full_name
+                                .unwrap_or(a.member_creator.username);
+                            let date = format_comment_date(&a.date);
+                            CommentInfo {
+                                date,
+                                author,
+                                text: a.data.text,
+                            }
+                        })
+                        .collect();
+                    Some(comment_infos)
+                } else {
+                    None
+                };
+
+                let result = ShowCardResult {
+                    id: card.id,
+                    name: card.name,
+                    board: board.name,
+                    list: list.name,
+                    labels,
+                    description: card.desc,
+                    archived: card.closed,
+                    comments,
+                };
+
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&result).context("Failed to serialize result")?
+                    );
+                } else {
+                    println!("Name: {}", result.name);
+                    println!("ID: {}", result.id);
+                    println!("Board: {}", result.board);
+                    println!("List: {}", result.list);
+
+                    if result.labels.is_empty() {
+                        println!("Labels: (none)");
+                    } else {
+                        let label_strs: Vec<String> = result
+                            .labels
+                            .iter()
+                            .map(|l| match (&l.name.is_empty(), &l.color) {
+                                (false, Some(c)) => format!("{} ({})", l.name, c),
+                                (false, None) => l.name.clone(),
+                                (true, Some(c)) => format!("({})", c),
+                                (true, None) => "(no color)".to_string(),
+                            })
+                            .collect();
+                        println!("Labels: {}", label_strs.join(", "));
+                    }
+
+                    if result.archived {
+                        println!("Archived: yes");
+                    }
+
+                    if !result.description.is_empty() {
+                        println!("Description:");
+                        for line in result.description.lines() {
+                            println!("  {}", line);
+                        }
+                    }
+
+                    if let Some(ref comments) = result.comments
+                        && !comments.is_empty()
+                    {
+                        println!("Comments:");
+                        for c in comments {
+                            println!("  [{}] {}: {}", c.date, c.author, c.text);
+                        }
                     }
                 }
             }
@@ -514,6 +678,101 @@ mod tests {
     }
 
     #[test]
+    fn parse_card_show() {
+        let cli = Cli::try_parse_from(["trello", "card", "show", "abc123"]).unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Show {
+                    card_id,
+                    json,
+                    comments,
+                } => {
+                    assert_eq!(card_id, "abc123");
+                    assert!(!json);
+                    assert!(!comments);
+                }
+                _ => panic!("Expected Show command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_show_with_json() {
+        let cli = Cli::try_parse_from(["trello", "card", "show", "abc123", "--json"]).unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Show {
+                    card_id,
+                    json,
+                    comments,
+                } => {
+                    assert_eq!(card_id, "abc123");
+                    assert!(json);
+                    assert!(!comments);
+                }
+                _ => panic!("Expected Show command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_show_with_comments() {
+        let cli = Cli::try_parse_from(["trello", "card", "show", "abc123", "--comments"]).unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Show {
+                    card_id,
+                    json,
+                    comments,
+                } => {
+                    assert_eq!(card_id, "abc123");
+                    assert!(!json);
+                    assert!(comments);
+                }
+                _ => panic!("Expected Show command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_show_with_json_and_comments() {
+        let cli = Cli::try_parse_from(["trello", "card", "show", "abc123", "--json", "--comments"])
+            .unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Show {
+                    card_id,
+                    json,
+                    comments,
+                } => {
+                    assert_eq!(card_id, "abc123");
+                    assert!(json);
+                    assert!(comments);
+                }
+                _ => panic!("Expected Show command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn test_format_comment_date() {
+        assert_eq!(
+            format_comment_date("2020-03-09T19:41:51.396Z"),
+            "2020-03-09 19:41"
+        );
+        assert_eq!(
+            format_comment_date("2024-01-15T10:30:00.000Z"),
+            "2024-01-15 10:30"
+        );
+        // Short string returns as-is
+        assert_eq!(format_comment_date("short"), "short");
+    }
+
+    #[test]
     fn test_looks_like_id() {
         // Valid 24-character hex string
         assert!(looks_like_id("507f1f77bcf86cd799439011"));
@@ -522,5 +781,117 @@ mod tests {
         assert!(!looks_like_id("My Card"));
         assert!(!looks_like_id("abc"));
         assert!(!looks_like_id("GHIJKLMNOPQRSTUVWXYZ1234"));
+    }
+
+    #[test]
+    fn test_show_card_result_json_serialization() {
+        let result = ShowCardResult {
+            id: "507f1f77bcf86cd799439011".to_string(),
+            name: "Fix login bug".to_string(),
+            board: "Project Alpha".to_string(),
+            list: "In Progress".to_string(),
+            labels: vec![
+                LabelInfo {
+                    name: "Bug".to_string(),
+                    color: Some("red".to_string()),
+                },
+                LabelInfo {
+                    name: "Urgent".to_string(),
+                    color: None,
+                },
+            ],
+            description: "The login page times out".to_string(),
+            archived: false,
+            comments: None,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["id"], "507f1f77bcf86cd799439011");
+        assert_eq!(parsed["name"], "Fix login bug");
+        assert_eq!(parsed["board"], "Project Alpha");
+        assert_eq!(parsed["list"], "In Progress");
+        assert_eq!(parsed["labels"][0]["name"], "Bug");
+        assert_eq!(parsed["labels"][0]["color"], "red");
+        assert_eq!(parsed["labels"][1]["name"], "Urgent");
+        assert_eq!(parsed["labels"][1]["color"], serde_json::Value::Null);
+        assert_eq!(parsed["description"], "The login page times out");
+        assert_eq!(parsed["archived"], false);
+        // Comments field should not be present when None
+        assert!(!parsed.as_object().unwrap().contains_key("comments"));
+    }
+
+    #[test]
+    fn test_show_card_result_with_comments_serialization() {
+        let result = ShowCardResult {
+            id: "507f1f77bcf86cd799439011".to_string(),
+            name: "Fix login bug".to_string(),
+            board: "Project Alpha".to_string(),
+            list: "In Progress".to_string(),
+            labels: vec![],
+            description: "".to_string(),
+            archived: true,
+            comments: Some(vec![
+                CommentInfo {
+                    date: "2024-01-15 10:30".to_string(),
+                    author: "Alice".to_string(),
+                    text: "I can reproduce this".to_string(),
+                },
+                CommentInfo {
+                    date: "2024-01-15 14:45".to_string(),
+                    author: "Bob".to_string(),
+                    text: "Fixed in commit abc123".to_string(),
+                },
+            ]),
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["id"], "507f1f77bcf86cd799439011");
+        assert_eq!(parsed["archived"], true);
+        assert_eq!(parsed["description"], "");
+        assert!(parsed["labels"].as_array().unwrap().is_empty());
+        assert_eq!(parsed["comments"][0]["date"], "2024-01-15 10:30");
+        assert_eq!(parsed["comments"][0]["author"], "Alice");
+        assert_eq!(parsed["comments"][0]["text"], "I can reproduce this");
+        assert_eq!(parsed["comments"][1]["date"], "2024-01-15 14:45");
+        assert_eq!(parsed["comments"][1]["author"], "Bob");
+        assert_eq!(parsed["comments"][1]["text"], "Fixed in commit abc123");
+    }
+
+    #[test]
+    fn test_label_info_serialization() {
+        let label_with_color = LabelInfo {
+            name: "Bug".to_string(),
+            color: Some("red".to_string()),
+        };
+        let json = serde_json::to_string(&label_with_color).unwrap();
+        assert!(json.contains("\"name\":\"Bug\""));
+        assert!(json.contains("\"color\":\"red\""));
+
+        let label_without_color = LabelInfo {
+            name: "No Color".to_string(),
+            color: None,
+        };
+        let json = serde_json::to_string(&label_without_color).unwrap();
+        assert!(json.contains("\"name\":\"No Color\""));
+        assert!(json.contains("\"color\":null"));
+    }
+
+    #[test]
+    fn test_comment_info_serialization() {
+        let comment = CommentInfo {
+            date: "2024-01-15 10:30".to_string(),
+            author: "Alice".to_string(),
+            text: "Test comment".to_string(),
+        };
+        let json = serde_json::to_string(&comment).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["date"], "2024-01-15 10:30");
+        assert_eq!(parsed["author"], "Alice");
+        assert_eq!(parsed["text"], "Test comment");
     }
 }

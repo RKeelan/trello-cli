@@ -6,7 +6,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::config::Config;
 use crate::models::{
-    AddLabel, ArchiveCard, Board, Card, Label, List, UpdateCardDesc, UpdateCardPosition,
+    Action, AddLabel, ArchiveCard, Board, Card, Label, List, UpdateCardDesc, UpdateCardPosition,
     UpdateListPosition,
 };
 
@@ -192,6 +192,41 @@ impl TrelloClient {
     pub fn get_list_cards(&self, list_id: &str) -> Result<Vec<Card>> {
         let path = format!("/lists/{}/cards", list_id);
         self.get(&path)
+    }
+
+    pub fn get_card_comments(&self, card_id: &str) -> Result<Vec<Action>> {
+        let mut all_comments = Vec::new();
+        let limit = 1000;
+        let mut before: Option<String> = None;
+
+        loop {
+            let path = match &before {
+                Some(id) => format!(
+                    "/cards/{}/actions?filter=commentCard&limit={}&before={}",
+                    card_id, limit, id
+                ),
+                None => format!(
+                    "/cards/{}/actions?filter=commentCard&limit={}",
+                    card_id, limit
+                ),
+            };
+
+            let batch: Vec<Action> = self.get(&path)?;
+            let batch_size = batch.len();
+            if batch_size == 0 {
+                break;
+            }
+
+            before = batch.last().map(|a| a.id.clone());
+            all_comments.extend(batch);
+
+            // If we got fewer than limit, we've reached the end
+            if batch_size < limit {
+                break;
+            }
+        }
+
+        Ok(all_comments)
     }
 
     pub fn move_card(&self, card_id: &str, position: &str) -> Result<Card> {
