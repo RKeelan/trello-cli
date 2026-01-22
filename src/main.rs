@@ -285,9 +285,9 @@ fn run() -> Result<()> {
                         };
 
                         // Apply list filter if specified
-                        if let Some(ref filter_lower) = list_filter_lower
-                            && !list_name.to_lowercase().contains(filter_lower)
-                        {
+                        if list_filter_lower.as_ref().is_some_and(|filter_lower| {
+                            !list_name.to_lowercase().contains(filter_lower)
+                        }) {
                             continue;
                         }
 
@@ -427,9 +427,7 @@ fn run() -> Result<()> {
                         }
                     }
 
-                    if let Some(ref comments) = result.comments
-                        && !comments.is_empty()
-                    {
+                    if let Some(comments) = result.comments.as_ref().filter(|c| !c.is_empty()) {
                         println!("Comments:");
                         for c in comments {
                             println!("  [{}] {}: {}", c.date, c.author, c.text);
