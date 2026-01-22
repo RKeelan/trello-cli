@@ -75,3 +75,28 @@ pub struct List {
 pub struct UpdateListPosition {
     pub pos: String,
 }
+
+/// Represents a Trello action (used for comments)
+#[derive(Debug, Deserialize)]
+pub struct Action {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub action_type: String,
+    pub date: String, // ISO 8601 timestamp, e.g., "2020-03-09T19:41:51.396Z"
+    pub data: ActionData,
+    #[serde(rename = "memberCreator")]
+    pub member_creator: ActionMember, // Always present for commentCard actions
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ActionData {
+    #[serde(default)]
+    pub text: String, // Comment text; empty string if not present
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ActionMember {
+    #[serde(rename = "fullName")]
+    pub full_name: Option<String>,
+    pub username: String,
+}
