@@ -6,8 +6,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::config::Config;
 use crate::models::{
-    Action, AddLabel, ArchiveCard, Board, Card, Label, List, UpdateCardDesc, UpdateCardPosition,
-    UpdateListPosition,
+    Action, AddComment, AddLabel, ArchiveCard, Board, Card, Label, List, UpdateCardDesc,
+    UpdateCardPosition, UpdateListPosition,
 };
 
 const BASE_URL: &str = "https://api.trello.com/1";
@@ -187,6 +187,14 @@ impl TrelloClient {
             self.put::<Card, _>(&path, &body)?;
         }
         Ok(card.name)
+    }
+
+    pub fn add_comment_to_card(&self, card_id: &str, text: &str) -> Result<Action> {
+        let path = format!("/cards/{}/actions/comments", card_id);
+        let body = AddComment {
+            text: text.to_string(),
+        };
+        self.post(&path, &body)
     }
 
     pub fn get_list_cards(&self, list_id: &str) -> Result<Vec<Card>> {

@@ -54,6 +54,12 @@ pub struct ArchiveCard {
     pub closed: bool,
 }
 
+/// Request body for adding a comment to a card
+#[derive(Debug, Serialize)]
+pub struct AddComment {
+    pub text: String,
+}
+
 /// Request body for updating a card's position
 #[derive(Debug, Serialize)]
 pub struct UpdateCardPosition {
