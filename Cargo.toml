@@ -2,6 +2,14 @@
 name = "trello-cli"
 version = "0.1.0"
 edition = "2024"
+description = "A Rust CLI for Trello, optimized for AI agents"
+license = "Apache-2.0"
+repository = "https://github.com/RKeelan/trello-cli"
+homepage = "https://github.com/RKeelan/trello-cli"
+readme = "README.md"
+keywords = ["trello", "cli", "api"]
+categories = ["command-line-utilities"]
+exclude = [".claude/", ".github/", "CLAUDE.md"]
 
 [[bin]]
 name = "trello"

@@ -1,6 +1,7 @@
 # trello-cli
 
 [![CI](https://github.com/RKeelan/trello-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/RKeelan/trello-cli/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/trello-cli)](https://crates.io/crates/trello-cli)
 
 A Rust CLI for Trello, optimized for AI agents.
 
