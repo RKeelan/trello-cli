@@ -58,6 +58,11 @@ Test:
 cargo test
 ```
 
+Format and lint:
+```bash
+cargo fmt --all && cargo clippy --fix --all-targets -- -D warnings
+```
+
 Run:
 ```bash
 cargo run -- --help
