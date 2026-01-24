@@ -46,30 +46,28 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum CardCommands {
-    /// Update a card's description
+    /// Update a card (description, labels, comment, archive)
     Update {
         /// The card ID
         card_id: String,
-        /// The new description
-        description: String,
-    },
-    /// Apply or remove a label from a card
-    Label {
-        /// The card ID
-        card_id: String,
-        /// The label name
-        label_name: String,
-        /// Remove the label instead of applying it
+        /// Update the card's description
+        #[arg(short, long)]
+        description: Option<String>,
+        /// Apply a label to the card (repeatable)
+        #[arg(short, long)]
+        label: Vec<String>,
+        /// Remove a label from the card (repeatable)
         #[arg(long)]
-        clear: bool,
-    },
-    /// Archive a card
-    Archive {
-        /// The card ID
-        card_id: String,
-        /// Optional comment to add before archiving
-        #[arg(long)]
+        clear_label: Vec<String>,
+        /// Add a comment to the card
+        #[arg(short, long)]
         comment: Option<String>,
+        /// Archive the card
+        #[arg(short, long)]
+        archive: bool,
+        /// Restore (unarchive) the card
+        #[arg(short, long)]
+        restore: bool,
     },
     /// Change a card's position
     Move {
@@ -222,25 +220,100 @@ fn run() -> Result<()> {
             CardCommands::Update {
                 card_id,
                 description,
+                label,
+                clear_label,
+                comment,
+                archive,
+                restore,
             } => {
-                let card = client.update_card_description(&card_id, &description)?;
-                println!("Updated card '{}' description", card.name);
-            }
-            CardCommands::Label {
-                card_id,
-                label_name,
-                clear,
-            } => {
-                if clear {
-                    let card_name = client.remove_label_by_name(&card_id, &label_name)?;
-                    println!("Removed label '{}' from card '{}'", label_name, card_name);
-                } else {
-                    let card_name = client.apply_label_by_name(&card_id, &label_name)?;
-                    println!("Applied label '{}' to card '{}'", label_name, card_name);
+                if description.is_none()
+                    && label.is_empty()
+                    && clear_label.is_empty()
+                    && comment.is_none()
+                    && !archive
+                    && !restore
+                {
+                    eprintln!("Error: at least one update flag must be provided");
+                    std::process::exit(1);
                 }
-            }
-            CardCommands::Archive { card_id, comment } => {
-                // Post comment first if provided and non-empty
+
+                if archive && restore {
+                    eprintln!("Error: --archive and --restore are mutually exclusive");
+                    std::process::exit(1);
+                }
+
+                let needs_card = !label.is_empty()
+                    || !clear_label.is_empty()
+                    || comment.is_some()
+                    || archive
+                    || restore;
+
+                // Update description
+                let desc_card_name = if let Some(ref desc) = description {
+                    let card = client
+                        .update_card_description(&card_id, desc)
+                        .with_context(|| {
+                            format!("Failed to update description of card '{}'", card_id)
+                        })?;
+                    Some(card.name)
+                } else {
+                    None
+                };
+
+                // Fetch card once for label/comment/archive operations
+                let card = if needs_card {
+                    Some(
+                        client
+                            .get_card(&card_id)
+                            .with_context(|| format!("Failed to fetch card '{}'", card_id))?,
+                    )
+                } else {
+                    None
+                };
+                let card_name = card
+                    .as_ref()
+                    .map(|c| c.name.clone())
+                    .or(desc_card_name)
+                    .unwrap_or_else(|| card_id.clone());
+
+                if description.is_some() {
+                    println!("Updated description of card '{}'", card_name);
+                }
+
+                // Apply/remove labels
+                if !label.is_empty() || !clear_label.is_empty() {
+                    let card = card.as_ref().unwrap();
+                    let board_labels =
+                        client.get_board_labels(&card.id_board).with_context(|| {
+                            format!("Failed to fetch labels for card '{}'", card_id)
+                        })?;
+
+                    for label_name in &label {
+                        client
+                            .apply_label_by_name(card, &board_labels, label_name)
+                            .with_context(|| {
+                                format!(
+                                    "Failed to apply label '{}' to card '{}'",
+                                    label_name, card.name
+                                )
+                            })?;
+                        println!("Applied label '{}' to card '{}'", label_name, card.name);
+                    }
+
+                    for label_name in &clear_label {
+                        client
+                            .remove_label_by_name(card, &board_labels, label_name)
+                            .with_context(|| {
+                                format!(
+                                    "Failed to remove label '{}' from card '{}'",
+                                    label_name, card.name
+                                )
+                            })?;
+                        println!("Removed label '{}' from card '{}'", label_name, card.name);
+                    }
+                }
+
+                // Add comment
                 if let Some(ref text) = comment {
                     let trimmed = text.trim();
                     if !trimmed.is_empty() {
@@ -249,10 +322,24 @@ fn run() -> Result<()> {
                             .with_context(|| {
                                 format!("Failed to add comment to card '{}'", card_id)
                             })?;
+                        println!("Added comment to card '{}'", card_name);
                     }
                 }
-                let card_name = client.archive_card(&card_id)?;
-                println!("Archived card '{}'", card_name);
+
+                // Archive or restore
+                if archive {
+                    let card = card.as_ref().unwrap();
+                    client
+                        .archive_card(card)
+                        .with_context(|| format!("Failed to archive card '{}'", card_id))?;
+                    println!("Archived card '{}'", card_name);
+                } else if restore {
+                    let card = card.as_ref().unwrap();
+                    client
+                        .restore_card(card)
+                        .with_context(|| format!("Failed to restore card '{}'", card_id))?;
+                    println!("Restored card '{}'", card_name);
+                }
             }
             CardCommands::Move { card_id, position } => {
                 let card = client.move_card(&card_id, &position)?;
@@ -497,17 +584,34 @@ mod tests {
     }
 
     #[test]
-    fn parse_card_update() {
-        let cli =
-            Cli::try_parse_from(["trello", "card", "update", "abc123", "New description"]).unwrap();
+    fn parse_card_update_description() {
+        let cli = Cli::try_parse_from([
+            "trello",
+            "card",
+            "update",
+            "abc123",
+            "-d",
+            "New description",
+        ])
+        .unwrap();
         match cli.command {
             Commands::Card { command } => match command {
                 CardCommands::Update {
                     card_id,
                     description,
+                    label,
+                    clear_label,
+                    comment,
+                    archive,
+                    restore,
                 } => {
                     assert_eq!(card_id, "abc123");
-                    assert_eq!(description, "New description");
+                    assert_eq!(description, Some("New description".to_string()));
+                    assert!(label.is_empty());
+                    assert!(clear_label.is_empty());
+                    assert_eq!(comment, None);
+                    assert!(!archive);
+                    assert!(!restore);
                 }
                 _ => panic!("Expected Update command"),
             },
@@ -516,135 +620,221 @@ mod tests {
     }
 
     #[test]
-    fn parse_card_label() {
-        let cli =
-            Cli::try_parse_from(["trello", "card", "label", "abc123", "In-Progress"]).unwrap();
+    fn parse_card_update_label() {
+        let cli = Cli::try_parse_from(["trello", "card", "update", "abc123", "-l", "Bug"]).unwrap();
         match cli.command {
             Commands::Card { command } => match command {
-                CardCommands::Label {
-                    card_id,
-                    label_name,
-                    clear,
-                } => {
+                CardCommands::Update { card_id, label, .. } => {
                     assert_eq!(card_id, "abc123");
-                    assert_eq!(label_name, "In-Progress");
-                    assert!(!clear);
+                    assert_eq!(label, vec!["Bug"]);
                 }
-                _ => panic!("Expected Label command"),
+                _ => panic!("Expected Update command"),
             },
             _ => panic!("Expected Card command"),
         }
     }
 
     #[test]
-    fn parse_card_label_clear() {
+    fn parse_card_update_multiple_labels() {
         let cli = Cli::try_parse_from([
-            "trello",
-            "card",
-            "label",
-            "abc123",
-            "In-Progress",
-            "--clear",
+            "trello", "card", "update", "abc123", "-l", "Bug", "-l", "Urgent",
         ])
         .unwrap();
         match cli.command {
             Commands::Card { command } => match command {
-                CardCommands::Label {
-                    card_id,
-                    label_name,
-                    clear,
-                } => {
+                CardCommands::Update { card_id, label, .. } => {
                     assert_eq!(card_id, "abc123");
-                    assert_eq!(label_name, "In-Progress");
-                    assert!(clear);
+                    assert_eq!(label, vec!["Bug", "Urgent"]);
                 }
-                _ => panic!("Expected Label command"),
+                _ => panic!("Expected Update command"),
             },
             _ => panic!("Expected Card command"),
         }
     }
 
     #[test]
-    fn parse_card_archive() {
-        let cli = Cli::try_parse_from(["trello", "card", "archive", "abc123"]).unwrap();
+    fn parse_card_update_clear_label() {
+        let cli =
+            Cli::try_parse_from(["trello", "card", "update", "abc123", "--clear-label", "Bug"])
+                .unwrap();
         match cli.command {
             Commands::Card { command } => match command {
-                CardCommands::Archive { card_id, comment } => {
+                CardCommands::Update {
+                    card_id,
+                    clear_label,
+                    ..
+                } => {
                     assert_eq!(card_id, "abc123");
-                    assert_eq!(comment, None);
+                    assert_eq!(clear_label, vec!["Bug"]);
                 }
-                _ => panic!("Expected Archive command"),
+                _ => panic!("Expected Update command"),
             },
             _ => panic!("Expected Card command"),
         }
     }
 
     #[test]
-    fn parse_card_archive_with_comment() {
-        let cli = Cli::try_parse_from(["trello", "card", "archive", "abc123", "--comment", "Done"])
+    fn parse_card_update_multiple_clear_labels() {
+        let cli = Cli::try_parse_from([
+            "trello",
+            "card",
+            "update",
+            "abc123",
+            "--clear-label",
+            "Bug",
+            "--clear-label",
+            "Urgent",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Update {
+                    card_id,
+                    clear_label,
+                    ..
+                } => {
+                    assert_eq!(card_id, "abc123");
+                    assert_eq!(clear_label, vec!["Bug", "Urgent"]);
+                }
+                _ => panic!("Expected Update command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_update_comment() {
+        let cli =
+            Cli::try_parse_from(["trello", "card", "update", "abc123", "-c", "A comment"]).unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Update {
+                    card_id, comment, ..
+                } => {
+                    assert_eq!(card_id, "abc123");
+                    assert_eq!(comment, Some("A comment".to_string()));
+                }
+                _ => panic!("Expected Update command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_update_archive() {
+        let cli = Cli::try_parse_from(["trello", "card", "update", "abc123", "-a"]).unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Update {
+                    card_id, archive, ..
+                } => {
+                    assert_eq!(card_id, "abc123");
+                    assert!(archive);
+                }
+                _ => panic!("Expected Update command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_update_restore() {
+        let cli = Cli::try_parse_from(["trello", "card", "update", "abc123", "-r"]).unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Update {
+                    card_id,
+                    archive,
+                    restore,
+                    ..
+                } => {
+                    assert_eq!(card_id, "abc123");
+                    assert!(!archive);
+                    assert!(restore);
+                }
+                _ => panic!("Expected Update command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_update_comment_and_archive() {
+        let cli = Cli::try_parse_from(["trello", "card", "update", "abc123", "-c", "Done", "-a"])
             .unwrap();
         match cli.command {
             Commands::Card { command } => match command {
-                CardCommands::Archive { card_id, comment } => {
+                CardCommands::Update {
+                    card_id,
+                    comment,
+                    archive,
+                    ..
+                } => {
                     assert_eq!(card_id, "abc123");
                     assert_eq!(comment, Some("Done".to_string()));
+                    assert!(archive);
                 }
-                _ => panic!("Expected Archive command"),
+                _ => panic!("Expected Update command"),
             },
             _ => panic!("Expected Card command"),
         }
     }
 
     #[test]
-    fn parse_card_archive_with_multiword_comment() {
+    fn parse_card_update_label_and_clear_label() {
         let cli = Cli::try_parse_from([
             "trello",
             "card",
-            "archive",
+            "update",
             "abc123",
-            "--comment",
-            "Task completed successfully",
+            "-l",
+            "green",
+            "--clear-label",
+            "red",
         ])
         .unwrap();
         match cli.command {
             Commands::Card { command } => match command {
-                CardCommands::Archive { card_id, comment } => {
+                CardCommands::Update {
+                    card_id,
+                    label,
+                    clear_label,
+                    ..
+                } => {
                     assert_eq!(card_id, "abc123");
-                    assert_eq!(comment, Some("Task completed successfully".to_string()));
+                    assert_eq!(label, vec!["green"]);
+                    assert_eq!(clear_label, vec!["red"]);
                 }
-                _ => panic!("Expected Archive command"),
+                _ => panic!("Expected Update command"),
             },
             _ => panic!("Expected Card command"),
         }
     }
 
     #[test]
-    fn parse_card_archive_with_empty_comment() {
-        let cli =
-            Cli::try_parse_from(["trello", "card", "archive", "abc123", "--comment", ""]).unwrap();
+    fn parse_card_update_no_flags_parses_ok() {
+        // Clap should parse successfully even with no flags; runtime check rejects it
+        let cli = Cli::try_parse_from(["trello", "card", "update", "abc123"]).unwrap();
         match cli.command {
             Commands::Card { command } => match command {
-                CardCommands::Archive { card_id, comment } => {
+                CardCommands::Update {
+                    card_id,
+                    description,
+                    label,
+                    clear_label,
+                    comment,
+                    archive,
+                    restore,
+                } => {
                     assert_eq!(card_id, "abc123");
-                    assert_eq!(comment, Some("".to_string()));
+                    assert_eq!(description, None);
+                    assert!(label.is_empty());
+                    assert!(clear_label.is_empty());
+                    assert_eq!(comment, None);
+                    assert!(!archive);
+                    assert!(!restore);
                 }
-                _ => panic!("Expected Archive command"),
-            },
-            _ => panic!("Expected Card command"),
-        }
-    }
-
-    #[test]
-    fn parse_card_archive_with_whitespace_comment() {
-        let cli = Cli::try_parse_from(["trello", "card", "archive", "abc123", "--comment", "   "])
-            .unwrap();
-        match cli.command {
-            Commands::Card { command } => match command {
-                CardCommands::Archive { card_id, comment } => {
-                    assert_eq!(card_id, "abc123");
-                    assert_eq!(comment, Some("   ".to_string()));
-                }
-                _ => panic!("Expected Archive command"),
+                _ => panic!("Expected Update command"),
             },
             _ => panic!("Expected Card command"),
         }
