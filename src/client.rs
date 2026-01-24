@@ -134,24 +134,23 @@ impl TrelloClient {
         self.post(&path, &body)
     }
 
-    /// Apply a label by name to a card.
-    /// Fetches the card to get its board, then finds the label by name.
-    /// Returns the card name for confirmation messages.
-    pub fn apply_label_by_name(&self, card_id: &str, label_name: &str) -> Result<String> {
-        let card = self.get_card(card_id)?;
-        let labels = self.get_board_labels(&card.id_board)?;
-
+    /// Apply a label by name to a card using pre-fetched card and board labels.
+    pub fn apply_label_by_name(
+        &self,
+        card: &Card,
+        labels: &[Label],
+        label_name: &str,
+    ) -> Result<()> {
         let label = labels
             .iter()
             .find(|l| l.name.eq_ignore_ascii_case(label_name))
             .ok_or_else(|| anyhow::anyhow!("Label '{}' not found on board", label_name))?;
 
-        // Check if label is already applied
         if !card.id_labels.contains(&label.id) {
-            self.add_label_to_card(card_id, &label.id)?;
+            self.add_label_to_card(&card.id, &label.id)?;
         }
 
-        Ok(card.name)
+        Ok(())
     }
 
     pub fn remove_label_from_card(&self, card_id: &str, label_id: &str) -> Result<()> {
@@ -159,34 +158,43 @@ impl TrelloClient {
         self.delete(&path)
     }
 
-    /// Remove a label by name from a card.
-    /// Fetches the card to get its board, then finds the label by name.
-    /// Returns the card name for confirmation messages.
-    pub fn remove_label_by_name(&self, card_id: &str, label_name: &str) -> Result<String> {
-        let card = self.get_card(card_id)?;
-        let labels = self.get_board_labels(&card.id_board)?;
-
+    /// Remove a label by name from a card using pre-fetched card and board labels.
+    pub fn remove_label_by_name(
+        &self,
+        card: &Card,
+        labels: &[Label],
+        label_name: &str,
+    ) -> Result<()> {
         let label = labels
             .iter()
             .find(|l| l.name.eq_ignore_ascii_case(label_name))
             .ok_or_else(|| anyhow::anyhow!("Label '{}' not found on board", label_name))?;
 
-        // Only remove if label is applied
         if card.id_labels.contains(&label.id) {
-            self.remove_label_from_card(card_id, &label.id)?;
+            self.remove_label_from_card(&card.id, &label.id)?;
         }
 
-        Ok(card.name)
+        Ok(())
     }
 
-    pub fn archive_card(&self, card_id: &str) -> Result<String> {
-        let card = self.get_card(card_id)?;
+    /// Archive a card using a pre-fetched Card.
+    pub fn archive_card(&self, card: &Card) -> Result<()> {
         if !card.closed {
-            let path = format!("/cards/{}", card_id);
+            let path = format!("/cards/{}", card.id);
             let body = ArchiveCard { closed: true };
             self.put::<Card, _>(&path, &body)?;
         }
-        Ok(card.name)
+        Ok(())
+    }
+
+    /// Restore (unarchive) a card using a pre-fetched Card.
+    pub fn restore_card(&self, card: &Card) -> Result<()> {
+        if card.closed {
+            let path = format!("/cards/{}", card.id);
+            let body = ArchiveCard { closed: false };
+            self.put::<Card, _>(&path, &body)?;
+        }
+        Ok(())
     }
 
     pub fn add_comment_to_card(&self, card_id: &str, text: &str) -> Result<Action> {
