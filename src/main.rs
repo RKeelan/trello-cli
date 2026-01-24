@@ -3,6 +3,7 @@ mod config;
 mod models;
 
 use std::collections::HashMap;
+use std::io::{self, Write};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -22,6 +23,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Save API credentials to the config file
+    Login {
+        /// Trello API key
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Trello API token
+        #[arg(long)]
+        api_token: Option<String>,
+    },
     /// Manage cards
     Card {
         #[command(subcommand)]
@@ -173,12 +183,41 @@ fn main() {
     }
 }
 
+fn prompt_value(prompt: &str) -> Result<String> {
+    print!("{}", prompt);
+    io::stdout().flush()?;
+    let mut value = String::new();
+    io::stdin()
+        .read_line(&mut value)
+        .context("Failed to read input")?;
+    Ok(value.trim().to_string())
+}
+
 fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    if let Commands::Login { api_key, api_token } = cli.command {
+        let key = match api_key {
+            Some(k) => k,
+            None => prompt_value("API key: ")?,
+        };
+        let token = match api_token {
+            Some(t) => t,
+            None => {
+                rpassword::prompt_password("API token: ").context("Failed to read API token")?
+            }
+        };
+        Config::save(&key, &token)?;
+        let path = Config::config_path()?;
+        println!("Credentials saved to {}", path.display());
+        return Ok(());
+    }
+
     let config = Config::load()?;
     let client = TrelloClient::new(&config);
 
     match cli.command {
+        Commands::Login { .. } => unreachable!(),
         Commands::Card { command } => match command {
             CardCommands::Update {
                 card_id,

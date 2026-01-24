@@ -98,7 +98,20 @@ impl Config {
         );
     }
 
-    fn config_path() -> Result<PathBuf> {
+    pub fn save(api_key: &str, api_token: &str) -> Result<()> {
+        let path = Self::config_path()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory {}", parent.display())
+            })?;
+        }
+        let contents = format!("api_key = \"{}\"\napi_token = \"{}\"\n", api_key, api_token);
+        fs::write(&path, contents)
+            .with_context(|| format!("Failed to write config file {}", path.display()))?;
+        Ok(())
+    }
+
+    pub fn config_path() -> Result<PathBuf> {
         let config_dir =
             dirs::config_dir().context("Could not determine config directory for this platform")?;
         Ok(config_dir.join("trello-cli").join("config.toml"))

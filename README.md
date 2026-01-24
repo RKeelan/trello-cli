@@ -8,6 +8,7 @@ A Rust CLI for Trello, optimized for AI agents.
 ## Usage
 
 ```bash
+trello login [--api-key <KEY>] [--api-token <TOKEN>]
 trello card update <CARD_ID> <DESCRIPTION>
 trello card label <CARD_ID> <LABEL_NAME> [--clear]
 trello card archive <CARD_ID> [--comment <TEXT>]
@@ -21,15 +22,18 @@ Position values: `top`, `bottom`, or a numeric value.
 
 ## Configuration
 
-Get your API key from https://trello.com/power-ups/admin and generate a token for it.
+Get an API key from https://trello.com/power-ups/admin and generate a token for it.
 
-### Option 1: Config file
+### Option 1: Login command
 
-Create a config file at `~/.config/trello-cli/config.toml` (Linux) or `~/Library/Application Support/trello-cli/config.toml` (macOS):
+```bash
+trello login
+```
 
-```toml
-api_key = "your_api_key"
-api_token = "your_api_token"
+This prompts for your API key and token interactively (the token is hidden during input) and saves them to the config file. You can also pass them as flags:
+
+```bash
+trello login --api-key YOUR_KEY --api-token YOUR_TOKEN
 ```
 
 ### Option 2: Environment variables
@@ -75,4 +79,3 @@ cargo install --path .
 ```
 
 This installs the `trello` binary to `~/.cargo/bin/`. Ensure this directory is in your `PATH`.
-```

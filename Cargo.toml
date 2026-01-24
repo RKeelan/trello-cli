@@ -1,6 +1,6 @@
 [package]
 name = "trello-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A Rust CLI for Trello, optimized for AI agents"
 license = "Apache-2.0"
@@ -24,6 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 regex = "1"
+rpassword = "7"
 
 [dev-dependencies]
 tempfile = "3"
