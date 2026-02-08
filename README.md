@@ -12,6 +12,7 @@ trello login [--api-key <KEY>] [--api-token <TOKEN>]
 trello card create <LIST> <NAME> [-d <DESC>] [-p <POSITION>] [-b <BOARD>]
 trello card update <CARD_ID> [-d <DESC>] [-l <LABEL>]... [--clear-label <LABEL>]... [-c <TEXT>] [-a] [-r]
 trello card move <CARD_ID> <POSITION>
+trello card delete <CARD_ID>
 trello card find <PATTERN> [-b <BOARD>] [-l <LIST>] [--json]
 trello card show <CARD_ID> [--json] [--comments]
 trello list move <LIST_ID> <POSITION>

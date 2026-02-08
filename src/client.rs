@@ -169,6 +169,11 @@ impl TrelloClient {
         self.get(&path)
     }
 
+    pub fn delete_card(&self, card_id: &str) -> Result<()> {
+        let path = format!("/cards/{}", card_id);
+        self.delete(&path)
+    }
+
     pub fn get_board_labels(&self, board_id: &str) -> Result<Vec<Label>> {
         let path = format!("/boards/{}/labels", board_id);
         self.get(&path)
