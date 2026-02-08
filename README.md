@@ -9,6 +9,7 @@ A Rust CLI for Trello, optimized for AI agents.
 
 ```bash
 trello login [--api-key <KEY>] [--api-token <TOKEN>]
+trello card create <LIST> <NAME> [-d <DESC>] [-p <POSITION>] [-b <BOARD>]
 trello card update <CARD_ID> [-d <DESC>] [-l <LABEL>]... [--clear-label <LABEL>]... [-c <TEXT>] [-a] [-r]
 trello card move <CARD_ID> <POSITION>
 trello card find <PATTERN> [-b <BOARD>] [-l <LIST>] [--json]

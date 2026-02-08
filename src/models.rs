@@ -66,6 +66,17 @@ pub struct UpdateCardPosition {
     pub pos: String,
 }
 
+/// Request body for creating a card
+#[derive(Debug, Serialize)]
+pub struct CreateCard {
+    pub name: String,
+    pub pos: String,
+    #[serde(rename = "idList")]
+    pub id_list: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desc: Option<String>,
+}
+
 /// Represents a Trello list
 #[derive(Debug, Deserialize, Clone)]
 pub struct List {
@@ -105,4 +116,41 @@ pub struct ActionMember {
     #[serde(rename = "fullName")]
     pub full_name: Option<String>,
     pub username: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CreateCard;
+
+    #[test]
+    fn create_card_serializes_with_description() {
+        let body = CreateCard {
+            name: "New card".to_string(),
+            pos: "top".to_string(),
+            id_list: "507f1f77bcf86cd799439011".to_string(),
+            desc: Some("Some description".to_string()),
+        };
+
+        let value = serde_json::to_value(body).unwrap();
+        assert_eq!(value["name"], "New card");
+        assert_eq!(value["pos"], "top");
+        assert_eq!(value["idList"], "507f1f77bcf86cd799439011");
+        assert_eq!(value["desc"], "Some description");
+    }
+
+    #[test]
+    fn create_card_serializes_without_description() {
+        let body = CreateCard {
+            name: "New card".to_string(),
+            pos: "bottom".to_string(),
+            id_list: "507f1f77bcf86cd799439011".to_string(),
+            desc: None,
+        };
+
+        let value = serde_json::to_value(body).unwrap();
+        assert_eq!(value["name"], "New card");
+        assert_eq!(value["pos"], "bottom");
+        assert_eq!(value["idList"], "507f1f77bcf86cd799439011");
+        assert!(value.get("desc").is_none());
+    }
 }
