@@ -6,8 +6,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::config::Config;
 use crate::models::{
-    Action, AddComment, AddLabel, ArchiveCard, Board, Card, Label, List, UpdateCardDesc,
-    UpdateCardPosition, UpdateListPosition,
+    Action, AddComment, AddLabel, ArchiveCard, Board, Card, CreateCard, Label, List,
+    UpdateCardDesc, UpdateCardPosition, UpdateListPosition,
 };
 
 const BASE_URL: &str = "https://api.trello.com/1";
@@ -16,6 +16,54 @@ pub struct TrelloClient {
     client: Client,
     api_key: String,
     api_token: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct NamedItem {
+    pub id: String,
+    pub name: String,
+    pub context: String,
+}
+
+fn looks_like_id(input: &str) -> bool {
+    input.len() == 24 && input.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+pub fn find_unique_match(items: &[NamedItem], query: &str) -> Result<String> {
+    let query_lower = query.to_lowercase();
+    let matches: Vec<&NamedItem> = items
+        .iter()
+        .filter(|item| item.name.to_lowercase().contains(&query_lower))
+        .collect();
+
+    match matches.len() {
+        0 => anyhow::bail!("No matches found for '{}'", query),
+        1 => Ok(matches[0].id.clone()),
+        _ => {
+            let options = matches
+                .iter()
+                .map(|item| format!("{} (board: {})", item.name, item.context))
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow::bail!(
+                "Multiple matches found for '{}': {}. Use -b/--board to disambiguate.",
+                query,
+                options
+            )
+        }
+    }
+}
+
+pub fn compute_position(cards: &[Card], target_pos: usize) -> String {
+    if target_pos <= 1 || cards.is_empty() {
+        "top".to_string()
+    } else if target_pos > cards.len() {
+        "bottom".to_string()
+    } else {
+        let before = cards[target_pos - 2].pos;
+        let after = cards[target_pos - 1].pos;
+        ((before + after) / 2.0).to_string()
+    }
 }
 
 impl TrelloClient {
@@ -205,6 +253,68 @@ impl TrelloClient {
         self.post(&path, &body)
     }
 
+    pub fn create_card(&self, body: &CreateCard) -> Result<Card> {
+        self.post("/cards", body)
+    }
+
+    pub fn resolve_list(&self, list: &str, board_filter: Option<&str>) -> Result<String> {
+        if looks_like_id(list) {
+            Ok(list.to_string())
+        } else {
+            self.resolve_list_by_name(list, board_filter)
+        }
+    }
+
+    pub fn resolve_list_by_name(
+        &self,
+        list_query: &str,
+        board_filter: Option<&str>,
+    ) -> Result<String> {
+        let boards =
+            if let Some(filter) = board_filter {
+                if looks_like_id(filter) {
+                    vec![self.get_board(filter).with_context(|| {
+                        format!("Board ID '{}' not found or inaccessible", filter)
+                    })?]
+                } else {
+                    let all_boards = self.get_member_boards().context("Failed to fetch boards")?;
+                    let filter_lower = filter.to_lowercase();
+                    let filtered: Vec<_> = all_boards
+                        .into_iter()
+                        .filter(|b| b.name.to_lowercase().contains(&filter_lower))
+                        .collect();
+
+                    if filtered.is_empty() {
+                        anyhow::bail!("No boards matching '{}' found", filter);
+                    }
+
+                    filtered
+                }
+            } else {
+                self.get_member_boards().context("Failed to fetch boards")?
+            };
+
+        if boards.is_empty() {
+            anyhow::bail!("No boards found");
+        }
+
+        let mut list_items = Vec::new();
+        for board in &boards {
+            let lists = self
+                .get_board_lists(&board.id)
+                .with_context(|| format!("Failed to fetch lists for board '{}'", board.name))?;
+            for list in lists {
+                list_items.push(NamedItem {
+                    id: list.id,
+                    name: list.name,
+                    context: board.name.clone(),
+                });
+            }
+        }
+
+        find_unique_match(&list_items, list_query)
+    }
+
     pub fn get_list_cards(&self, list_id: &str) -> Result<Vec<Card>> {
         let path = format!("/lists/{}/cards", list_id);
         self.get(&path)
@@ -257,17 +367,7 @@ impl TrelloClient {
                         .filter(|c| c.id != card.id)
                         .collect();
                     cards.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap());
-
-                    if target_pos <= 1 || cards.is_empty() {
-                        "top".to_string()
-                    } else if target_pos > cards.len() {
-                        "bottom".to_string()
-                    } else {
-                        // Position between cards[target_pos-2] and cards[target_pos-1]
-                        let before = cards[target_pos - 2].pos;
-                        let after = cards[target_pos - 1].pos;
-                        ((before + after) / 2.0).to_string()
-                    }
+                    compute_position(&cards, target_pos)
                 } else {
                     position.to_string()
                 }
@@ -443,5 +543,137 @@ mod tests {
 
         assert_eq!(client.api_key, "env_key");
         assert_eq!(client.api_token, "env_token");
+    }
+
+    #[test]
+    fn find_unique_match_returns_one_match() {
+        let items = vec![
+            NamedItem {
+                id: "1".to_string(),
+                name: "To Do".to_string(),
+                context: "Board A".to_string(),
+            },
+            NamedItem {
+                id: "2".to_string(),
+                name: "Done".to_string(),
+                context: "Board A".to_string(),
+            },
+        ];
+
+        let id = find_unique_match(&items, "to do").unwrap();
+        assert_eq!(id, "1");
+    }
+
+    #[test]
+    fn find_unique_match_returns_error_on_zero_matches() {
+        let items = vec![NamedItem {
+            id: "1".to_string(),
+            name: "To Do".to_string(),
+            context: "Board A".to_string(),
+        }];
+
+        let err = find_unique_match(&items, "missing")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("No matches found"));
+    }
+
+    #[test]
+    fn find_unique_match_returns_error_with_context_on_multiple_matches() {
+        let items = vec![
+            NamedItem {
+                id: "1".to_string(),
+                name: "To Do".to_string(),
+                context: "Board A".to_string(),
+            },
+            NamedItem {
+                id: "2".to_string(),
+                name: "To Do".to_string(),
+                context: "Board B".to_string(),
+            },
+        ];
+
+        let err = find_unique_match(&items, "to do").unwrap_err().to_string();
+        assert!(err.contains("Multiple matches found"));
+        assert!(err.contains("Board A"));
+        assert!(err.contains("Board B"));
+    }
+
+    #[test]
+    fn compute_position_returns_top_for_first_or_less() {
+        let cards = vec![
+            Card {
+                id: "1".to_string(),
+                name: "A".to_string(),
+                desc: String::new(),
+                id_board: "b".to_string(),
+                id_list: "l".to_string(),
+                id_labels: vec![],
+                closed: false,
+                pos: 10.0,
+            },
+            Card {
+                id: "2".to_string(),
+                name: "B".to_string(),
+                desc: String::new(),
+                id_board: "b".to_string(),
+                id_list: "l".to_string(),
+                id_labels: vec![],
+                closed: false,
+                pos: 20.0,
+            },
+        ];
+
+        assert_eq!(compute_position(&cards, 1), "top");
+    }
+
+    #[test]
+    fn compute_position_returns_bottom_beyond_length() {
+        let cards = vec![Card {
+            id: "1".to_string(),
+            name: "A".to_string(),
+            desc: String::new(),
+            id_board: "b".to_string(),
+            id_list: "l".to_string(),
+            id_labels: vec![],
+            closed: false,
+            pos: 10.0,
+        }];
+
+        assert_eq!(compute_position(&cards, 2), "bottom");
+    }
+
+    #[test]
+    fn compute_position_returns_midpoint_for_middle() {
+        let cards = vec![
+            Card {
+                id: "1".to_string(),
+                name: "A".to_string(),
+                desc: String::new(),
+                id_board: "b".to_string(),
+                id_list: "l".to_string(),
+                id_labels: vec![],
+                closed: false,
+                pos: 10.0,
+            },
+            Card {
+                id: "2".to_string(),
+                name: "B".to_string(),
+                desc: String::new(),
+                id_board: "b".to_string(),
+                id_list: "l".to_string(),
+                id_labels: vec![],
+                closed: false,
+                pos: 20.0,
+            },
+        ];
+
+        assert_eq!(compute_position(&cards, 2), "15");
+    }
+
+    #[test]
+    fn compute_position_returns_top_for_empty_list() {
+        let cards: Vec<Card> = vec![];
+        assert_eq!(compute_position(&cards, 5), "top");
     }
 }

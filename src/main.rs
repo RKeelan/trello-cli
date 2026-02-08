@@ -10,8 +10,9 @@ use clap::{Parser, Subcommand};
 use regex::RegexBuilder;
 use serde::Serialize;
 
-use client::TrelloClient;
+use client::{TrelloClient, compute_position};
 use config::Config;
+use models::CreateCard;
 
 #[derive(Parser)]
 #[command(name = "trello")]
@@ -46,6 +47,22 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum CardCommands {
+    /// Create a new card
+    Create {
+        /// The list ID or list name substring
+        list: String,
+        /// The card name
+        name: String,
+        /// Set the card description
+        #[arg(short, long)]
+        description: Option<String>,
+        /// Position: "top", "bottom", or numeric ordinal
+        #[arg(short, long, default_value = "bottom")]
+        position: String,
+        /// Filter by board name or ID when resolving list names
+        #[arg(short, long)]
+        board: Option<String>,
+    },
     /// Update a card (description, labels, comment, archive)
     Update {
         /// The card ID
@@ -217,6 +234,49 @@ fn run() -> Result<()> {
     match cli.command {
         Commands::Login { .. } => unreachable!(),
         Commands::Card { command } => match command {
+            CardCommands::Create {
+                list,
+                name,
+                description,
+                position,
+                board,
+            } => {
+                let list_id = client
+                    .resolve_list(&list, board.as_deref())
+                    .with_context(|| format!("Failed to resolve list '{}'", list))?;
+
+                let pos = match position.as_str() {
+                    "top" | "bottom" => position.clone(),
+                    _ => {
+                        if let Ok(target_pos) = position.parse::<usize>() {
+                            let mut cards = client.get_list_cards(&list_id).with_context(|| {
+                                format!("Failed to fetch cards for list '{}'", list_id)
+                            })?;
+                            cards.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap());
+                            compute_position(&cards, target_pos)
+                        } else {
+                            position.clone()
+                        }
+                    }
+                };
+
+                let body = CreateCard {
+                    name,
+                    pos,
+                    id_list: list_id,
+                    desc: description,
+                };
+
+                let card = client.create_card(&body).context("Failed to create card")?;
+                let list = client
+                    .get_list(&card.id_list)
+                    .with_context(|| format!("Failed to fetch list '{}'", card.id_list))?;
+
+                println!(
+                    "Created card '{}' ({}) in list '{}'",
+                    card.name, card.id, list.name
+                );
+            }
             CardCommands::Update {
                 card_id,
                 description,
@@ -614,6 +674,88 @@ mod tests {
                     assert!(!restore);
                 }
                 _ => panic!("Expected Update command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_create_minimal() {
+        let cli = Cli::try_parse_from([
+            "trello",
+            "card",
+            "create",
+            "507f1f77bcf86cd799439011",
+            "Card name",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Create {
+                    list,
+                    name,
+                    description,
+                    position,
+                    board,
+                } => {
+                    assert_eq!(list, "507f1f77bcf86cd799439011");
+                    assert_eq!(name, "Card name");
+                    assert_eq!(description, None);
+                    assert_eq!(position, "bottom");
+                    assert_eq!(board, None);
+                }
+                _ => panic!("Expected Create command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_create_with_all_optional_flags() {
+        let cli = Cli::try_parse_from([
+            "trello",
+            "card",
+            "create",
+            "list123",
+            "Card name",
+            "-d",
+            "desc",
+            "-p",
+            "top",
+            "-b",
+            "My Board",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Create {
+                    list,
+                    name,
+                    description,
+                    position,
+                    board,
+                } => {
+                    assert_eq!(list, "list123");
+                    assert_eq!(name, "Card name");
+                    assert_eq!(description, Some("desc".to_string()));
+                    assert_eq!(position, "top");
+                    assert_eq!(board, Some("My Board".to_string()));
+                }
+                _ => panic!("Expected Create command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_create_list_name_substring() {
+        let cli = Cli::try_parse_from(["trello", "card", "create", "To Do", "Card name"]).unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Create { list, .. } => {
+                    assert_eq!(list, "To Do");
+                }
+                _ => panic!("Expected Create command"),
             },
             _ => panic!("Expected Card command"),
         }
