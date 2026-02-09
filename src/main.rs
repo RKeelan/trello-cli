@@ -93,6 +93,11 @@ enum CardCommands {
         /// Position: "top", "bottom", or a numeric value
         position: String,
     },
+    /// Delete a card
+    Delete {
+        /// The card ID
+        card_id: String,
+    },
     /// Find cards matching a pattern
     Find {
         /// Regex pattern to match card names
@@ -404,6 +409,15 @@ fn run() -> Result<()> {
             CardCommands::Move { card_id, position } => {
                 let card = client.move_card(&card_id, &position)?;
                 println!("Moved card '{}' to position {}", card.name, position);
+            }
+            CardCommands::Delete { card_id } => {
+                let card = client
+                    .get_card(&card_id)
+                    .with_context(|| format!("Failed to fetch card '{}'", card_id))?;
+                client
+                    .delete_card(&card_id)
+                    .with_context(|| format!("Failed to delete card '{}'", card_id))?;
+                println!("Deleted card '{}' ({})", card.name, card.id);
             }
             CardCommands::Find {
                 pattern,
@@ -992,6 +1006,20 @@ mod tests {
                     assert_eq!(position, "top");
                 }
                 _ => panic!("Expected Move command"),
+            },
+            _ => panic!("Expected Card command"),
+        }
+    }
+
+    #[test]
+    fn parse_card_delete() {
+        let cli = Cli::try_parse_from(["trello", "card", "delete", "abc123"]).unwrap();
+        match cli.command {
+            Commands::Card { command } => match command {
+                CardCommands::Delete { card_id } => {
+                    assert_eq!(card_id, "abc123");
+                }
+                _ => panic!("Expected Delete command"),
             },
             _ => panic!("Expected Card command"),
         }
