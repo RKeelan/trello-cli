@@ -43,6 +43,11 @@ enum Commands {
         #[command(subcommand)]
         command: ListCommands,
     },
+    /// Manage boards
+    Board {
+        #[command(subcommand)]
+        command: BoardCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -187,12 +192,32 @@ fn format_comment_date(iso_date: &str) -> String {
 
 #[derive(Subcommand)]
 enum ListCommands {
+    /// Show detailed information about a list
+    Show {
+        /// The list ID
+        list_id: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Change a list's position
     Move {
         /// The list ID
         list_id: String,
         /// Position: "top", "bottom", or a numeric value
         position: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum BoardCommands {
+    /// Show detailed information about a board
+    Show {
+        /// The board ID
+        board_id: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -637,9 +662,56 @@ fn run() -> Result<()> {
             }
         },
         Commands::List { command } => match command {
+            ListCommands::Show { list_id, json } => {
+                let list = client
+                    .get_list(&list_id)
+                    .with_context(|| format!("Failed to fetch list '{}'", list_id))?;
+                let board = client
+                    .get_board(&list.id_board)
+                    .with_context(|| format!("Failed to fetch board for list '{}'", list_id))?;
+
+                if json {
+                    let result = serde_json::json!({
+                        "id": list.id,
+                        "name": list.name,
+                        "board": board.name,
+                        "position": list.pos,
+                    });
+                    println!(
+                        "{}",
+                        serde_json::to_string(&result).context("Failed to serialize result")?
+                    );
+                } else {
+                    println!("Name: {}", list.name);
+                    println!("ID: {}", list.id);
+                    println!("Board: {}", board.name);
+                    println!("Position: {}", list.pos);
+                }
+            }
             ListCommands::Move { list_id, position } => {
                 let list = client.move_list(&list_id, &position)?;
                 println!("Moved list '{}' to position {}", list.name, position);
+            }
+        },
+        Commands::Board { command } => match command {
+            BoardCommands::Show { board_id, json } => {
+                let board = client
+                    .get_board(&board_id)
+                    .with_context(|| format!("Failed to fetch board '{}'", board_id))?;
+
+                if json {
+                    let result = serde_json::json!({
+                        "id": board.id,
+                        "name": board.name,
+                    });
+                    println!(
+                        "{}",
+                        serde_json::to_string(&result).context("Failed to serialize result")?
+                    );
+                } else {
+                    println!("Name: {}", board.name);
+                    println!("ID: {}", board.id);
+                }
             }
         },
     }
@@ -1034,8 +1106,67 @@ mod tests {
                     assert_eq!(list_id, "list456");
                     assert_eq!(position, "bottom");
                 }
+                _ => panic!("Expected Move command"),
             },
             _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn parse_list_show() {
+        let cli = Cli::try_parse_from(["trello", "list", "show", "list456"]).unwrap();
+        match cli.command {
+            Commands::List { command } => match command {
+                ListCommands::Show { list_id, json } => {
+                    assert_eq!(list_id, "list456");
+                    assert!(!json);
+                }
+                _ => panic!("Expected Show command"),
+            },
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn parse_list_show_with_json() {
+        let cli = Cli::try_parse_from(["trello", "list", "show", "list456", "--json"]).unwrap();
+        match cli.command {
+            Commands::List { command } => match command {
+                ListCommands::Show { list_id, json } => {
+                    assert_eq!(list_id, "list456");
+                    assert!(json);
+                }
+                _ => panic!("Expected Show command"),
+            },
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn parse_board_show() {
+        let cli = Cli::try_parse_from(["trello", "board", "show", "board123"]).unwrap();
+        match cli.command {
+            Commands::Board { command } => match command {
+                BoardCommands::Show { board_id, json } => {
+                    assert_eq!(board_id, "board123");
+                    assert!(!json);
+                }
+            },
+            _ => panic!("Expected Board command"),
+        }
+    }
+
+    #[test]
+    fn parse_board_show_with_json() {
+        let cli = Cli::try_parse_from(["trello", "board", "show", "board123", "--json"]).unwrap();
+        match cli.command {
+            Commands::Board { command } => match command {
+                BoardCommands::Show { board_id, json } => {
+                    assert_eq!(board_id, "board123");
+                    assert!(json);
+                }
+            },
+            _ => panic!("Expected Board command"),
         }
     }
 

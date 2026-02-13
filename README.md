@@ -15,6 +15,8 @@ trello card move <CARD_ID> <POSITION>
 trello card delete <CARD_ID>
 trello card find <PATTERN> [-b <BOARD>] [-l <LIST>] [--json]
 trello card show <CARD_ID> [--json] [--comments]
+trello board show <BOARD_ID> [--json]
+trello list show <LIST_ID> [--json]
 trello list move <LIST_ID> <POSITION>
 ```
 
