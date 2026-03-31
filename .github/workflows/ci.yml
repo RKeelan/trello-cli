@@ -39,3 +39,11 @@ jobs:
 
     - name: Run clippy
       run: cargo clippy --all-targets -- -D warnings
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Check dependencies (cargo-deny)
+      uses: EmbarkStudios/cargo-deny-action@v2
